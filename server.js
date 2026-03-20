@@ -317,43 +317,49 @@ function runLocalTool(name, input, localData) {
 }
 
 async function runExternalTool(name, input, googleToken) {
-  if (name === 'create_calendar_event') {
-    if (googleToken && google.isConfigured()) {
-      await google.createCalendarEvent(googleToken, input);
-      return `Added to Google Calendar: "${input.title}"`;
+  try {
+    if (name === 'create_calendar_event') {
+      if (googleToken && google.isConfigured()) {
+        await google.createCalendarEvent(googleToken, input);
+        return `Added to Google Calendar: "${input.title}"`;
+      }
+      if (microsoft.isConnected()) {
+        await microsoft.createCalendarEvent(input);
+        return `Added to Outlook: "${input.title}"`;
+      }
+      return 'No calendar connected. Used local schedule instead.';
     }
-    if (microsoft.isConnected()) {
-      await microsoft.createCalendarEvent(input);
-      return `Added to Outlook: "${input.title}"`;
-    }
-    return 'No calendar connected. Used local schedule instead.';
-  }
 
-  if (name === 'create_external_task') {
-    if (googleToken && google.isConfigured()) {
-      await google.createTask(googleToken, input);
-      return `Added to Google Tasks: "${input.title}"`;
+    if (name === 'create_external_task') {
+      if (googleToken && google.isConfigured()) {
+        await google.createTask(googleToken, input);
+        return `Added to Google Tasks: "${input.title}"`;
+      }
+      if (microsoft.isConnected()) {
+        await microsoft.createTask(input);
+        return `Added to Microsoft To Do: "${input.title}"`;
+      }
+      return 'No task service connected.';
     }
-    if (microsoft.isConnected()) {
-      await microsoft.createTask(input);
-      return `Added to Microsoft To Do: "${input.title}"`;
-    }
-    return 'No task service connected.';
-  }
 
-  if (name === 'complete_external_task') {
-    if (input.source === 'google' && googleToken) {
-      await google.completeTask(googleToken, input.task_id);
-      return 'Task marked complete in Google Tasks.';
+    if (name === 'complete_external_task') {
+      if (input.source === 'google' && googleToken) {
+        await google.completeTask(googleToken, input.task_id);
+        return 'Task marked complete in Google Tasks.';
+      }
+      if (input.source === 'microsoft' && microsoft.isConnected()) {
+        await microsoft.completeTask(input.task_id);
+        return 'Task marked complete in Microsoft To Do.';
+      }
+      return 'Could not complete task.';
     }
-    if (input.source === 'microsoft' && microsoft.isConnected()) {
-      await microsoft.completeTask(input.task_id);
-      return 'Task marked complete in Microsoft To Do.';
-    }
-    return 'Could not complete task.';
-  }
 
-  return 'Unknown tool';
+    return 'Unknown tool';
+  } catch(e) {
+    const msg = e?.response?.data?.error?.message || e?.message || 'Unknown error';
+    console.error(`Tool ${name} failed:`, msg);
+    return `Error: ${msg}`;
+  }
 }
 
 // ── Chat endpoint ─────────────────────────────────────────────────────────────

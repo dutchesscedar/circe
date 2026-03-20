@@ -254,7 +254,10 @@ class CirceApp {
         })
       });
 
-      if (!res.ok) throw new Error(`Server error ${res.status}`);
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || `Server error ${res.status}`);
+      }
       const json = await res.json();
 
       if (json.localData) this.saveData(json.localData);
@@ -278,7 +281,7 @@ class CirceApp {
 
     } catch (err) {
       console.error(err);
-      const msg = "I'm sorry, something went wrong. Please try again.";
+      const msg = `I'm sorry, something went wrong. ${err.message || 'Please try again.'}`;
       this.addBubble('circe', msg);
       await this.speak(msg);
     }
