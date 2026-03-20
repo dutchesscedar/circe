@@ -108,8 +108,10 @@ async function fetchExternalData(googleToken) {
 // ── System prompt ─────────────────────────────────────────────────────────────
 
 function buildSystemPrompt(localData, external) {
-  const today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-  const todayStr = new Date().toISOString().split('T')[0];
+  const now = new Date();
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const today = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone });
+  const todayStr = now.toISOString().split('T')[0];
 
   const showTasks = external.tasks.length > 0 ? external.tasks : (localData.tasks || []).filter(t => !t.done);
   const showCalendar = external.calendar.length > 0 ? external.calendar : (localData.schedule || []);
@@ -153,6 +155,8 @@ Guidelines:
 - Never use emoji — they are read aloud as words and sound strange
 - For complex or sensitive topics (medical, legal), say "That's worth a second opinion — let me ask my advisor about that"
 - Today is ${today}
+- Local time zone: ${timeZone}
+- When creating calendar events, use ISO 8601 format and assume the local time zone unless told otherwise
 - ${connections}
 
 UPCOMING CALENDAR (next 7 days):

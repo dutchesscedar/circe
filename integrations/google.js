@@ -53,14 +53,15 @@ async function getCalendarEvents(accessToken, days = 7) {
 async function createCalendarEvent(accessToken, { title, start, end, location, description }) {
   const auth = makeAuthClient(accessToken);
   const cal = google.calendar({ version: 'v3', auth });
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const res = await cal.events.insert({
     calendarId: 'primary',
     requestBody: {
       summary: title,
       description: description || '',
       location: location || '',
-      start: { dateTime: start },
-      end: { dateTime: end || new Date(new Date(start).getTime() + 3600000).toISOString() },
+      start: { dateTime: start, timeZone },
+      end: { dateTime: end || new Date(new Date(start).getTime() + 3600000).toISOString(), timeZone },
     },
   });
   return res.data;
