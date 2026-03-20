@@ -2,6 +2,7 @@ const msal = require('@azure/msal-node');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const config = require('../config');
 
 const TOKENS_FILE = path.join(__dirname, '../tokens.json');
 const REDIRECT_URI = 'http://localhost:3000/auth/microsoft/callback';
@@ -16,7 +17,7 @@ function saveTokens(data) {
 }
 
 function isConfigured() {
-  return !!(process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET);
+  return !!(config.get('MICROSOFT_CLIENT_ID') && config.get('MICROSOFT_CLIENT_SECRET'));
 }
 
 function isConnected() {
@@ -42,8 +43,8 @@ const cachePlugin = {
 function makePca() {
   return new msal.ConfidentialClientApplication({
     auth: {
-      clientId: process.env.MICROSOFT_CLIENT_ID,
-      clientSecret: process.env.MICROSOFT_CLIENT_SECRET,
+      clientId: config.get('MICROSOFT_CLIENT_ID'),
+      clientSecret: config.get('MICROSOFT_CLIENT_SECRET'),
       authority: 'https://login.microsoftonline.com/common',
     },
     cache: { cachePlugin },

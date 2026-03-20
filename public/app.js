@@ -319,6 +319,36 @@ class CirceApp {
     } catch(e) {}
   }
 
+  async openSettings() {
+    const modal = document.getElementById('settings-modal');
+    modal.style.display = 'flex';
+    document.getElementById('settings-msg').style.display = 'none';
+    try {
+      const res = await fetch('/api/settings');
+      const s = await res.json();
+      document.getElementById('s-google-id').value = s.GOOGLE_CLIENT_ID || '';
+      document.getElementById('s-google-secret').value = s.GOOGLE_CLIENT_SECRET || '';
+      document.getElementById('s-ms-id').value = s.MICROSOFT_CLIENT_ID || '';
+      document.getElementById('s-ms-secret').value = s.MICROSOFT_CLIENT_SECRET || '';
+    } catch(e) {}
+  }
+
+  closeSettings() {
+    document.getElementById('settings-modal').style.display = 'none';
+  }
+
+  async saveSettings() {
+    const body = {
+      GOOGLE_CLIENT_ID:        document.getElementById('s-google-id').value,
+      GOOGLE_CLIENT_SECRET:    document.getElementById('s-google-secret').value,
+      MICROSOFT_CLIENT_ID:     document.getElementById('s-ms-id').value,
+      MICROSOFT_CLIENT_SECRET: document.getElementById('s-ms-secret').value,
+    };
+    await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    document.getElementById('settings-msg').style.display = 'block';
+    this.loadConnectionStatus();
+  }
+
   async loadConnectionStatus() {
     try {
       const res = await fetch('/api/connections');

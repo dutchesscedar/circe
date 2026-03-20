@@ -3,6 +3,7 @@ const express = require('express');
 const Anthropic = require('@anthropic-ai/sdk');
 const google = require('./integrations/google');
 const microsoft = require('./integrations/microsoft');
+const config = require('./config');
 
 const app = express();
 app.use(express.json());
@@ -51,6 +52,30 @@ app.get('/auth/microsoft/callback', async (req, res) => {
 app.get('/auth/microsoft/disconnect', (req, res) => {
   microsoft.disconnect();
   res.redirect('/');
+});
+
+// Settings — save credentials via browser UI (stored in config.json, gitignored)
+app.get('/api/settings', (req, res) => {
+  const mask = (v) => v ? v.slice(0, 6) + '••••••••' : '';
+  res.json({
+    GOOGLE_CLIENT_ID:       config.get('GOOGLE_CLIENT_ID'),
+    GOOGLE_CLIENT_SECRET:   mask(config.get('GOOGLE_CLIENT_SECRET')),
+    MICROSOFT_CLIENT_ID:    config.get('MICROSOFT_CLIENT_ID'),
+    MICROSOFT_CLIENT_SECRET: mask(config.get('MICROSOFT_CLIENT_SECRET')),
+  });
+});
+
+app.post('/api/settings', (req, res) => {
+  const allowed = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'MICROSOFT_CLIENT_ID', 'MICROSOFT_CLIENT_SECRET'];
+  const update = {};
+  for (const key of allowed) {
+    // Don't overwrite with a masked value
+    if (req.body[key] && !req.body[key].includes('••••')) {
+      update[key] = req.body[key].trim();
+    }
+  }
+  config.save(update);
+  res.json({ ok: true });
 });
 
 app.get('/api/connections', (req, res) => {

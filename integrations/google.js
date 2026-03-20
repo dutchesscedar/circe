@@ -1,6 +1,7 @@
 const { google } = require('googleapis');
 const fs = require('fs');
 const path = require('path');
+const config = require('../config');
 
 const TOKENS_FILE = path.join(__dirname, '../tokens.json');
 const REDIRECT_URI = 'http://localhost:3000/auth/google/callback';
@@ -20,14 +21,14 @@ function saveTokens(data) {
 
 function makeClient() {
   return new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
+    config.get('GOOGLE_CLIENT_ID'),
+    config.get('GOOGLE_CLIENT_SECRET'),
     REDIRECT_URI
   );
 }
 
 function isConfigured() {
-  return !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+  return !!(config.get('GOOGLE_CLIENT_ID') && config.get('GOOGLE_CLIENT_SECRET'));
 }
 
 function isConnected() {
