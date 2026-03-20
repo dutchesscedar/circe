@@ -15,6 +15,8 @@ class CirceApp {
     this.tokenClient = null;
     this.tokenRefreshTimer = null;
 
+    this.calendarData = [];    // latest calendar events from server
+
     this.statusEl = document.getElementById('status-text');
     this.interimEl = document.getElementById('interim-text');
     this.convEl = document.getElementById('conversation');
@@ -66,12 +68,72 @@ class CirceApp {
       this.taskListEl.innerHTML = '<div class="no-tasks">No tasks yet</div>';
       return;
     }
-    this.taskListEl.innerHTML = pending.map(t =>
-      `<div class="task-item">
-        <div class="task-bullet"></div>
-        <span>${this.escapeHtml(t.title)}</span>
-      </div>`
-    ).join('');
+    this.taskListEl.innerHTML = pending.map(t => {
+      const isLocal = !t.source && t.googleId === null;
+      return `<div class="task-item">
+        <div class="task-bullet${isLocal ? ' local' : ''}"></div>
+        <span class="task-label">${this.escapeHtml(t.title)}</span>
+        ${isLocal ? '<span class="task-source">local</span>' : ''}
+      </div>`;
+    }).join('');
+  }
+
+  updateCalendarDisplay() {
+    const el = document.getElementById('calendar-list');
+    if (!el) return;
+    const events = this.calendarData;
+    if (!events || events.length === 0) {
+      el.innerHTML = '<div class="no-events">No upcoming events</div>';
+      return;
+    }
+
+    const todayStr = new Date().toISOString().slice(0, 10);
+    // Group events by date
+    const byDay = {};
+    for (const e of events) {
+      const dateKey = (e.start || '').slice(0, 10);
+      if (!dateKey) continue;
+      if (!byDay[dateKey]) byDay[dateKey] = [];
+      byDay[dateKey].push(e);
+    }
+
+    el.innerHTML = Object.keys(byDay).sort().slice(0, 7).map(dateKey => {
+      const isToday = dateKey === todayStr;
+      const label = isToday ? 'Today' : new Date(dateKey + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+      const eventsHtml = byDay[dateKey].map(e => {
+        const hasTime = e.start && e.start.includes('T');
+        const timeStr = hasTime
+          ? new Date(e.start).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+          : 'All day';
+        return `<div class="cal-event">
+          <span class="cal-time">${timeStr}</span>
+          <span class="cal-title" title="${this.escapeHtml(e.title)}">${this.escapeHtml(e.title)}</span>
+        </div>`;
+      }).join('');
+      return `<div class="cal-day">
+        <div class="cal-day-label${isToday ? ' today' : ''}">${label}</div>
+        ${eventsHtml}
+      </div>`;
+    }).join('');
+  }
+
+  async refreshSidebar() {
+    if (!this.googleToken) return;
+    try {
+      const res = await fetch('/api/sidebar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ googleToken: this.googleToken }),
+      });
+      if (!res.ok) return;
+      const { calendar, tasks, googleTokenExpired } = await res.json();
+      if (googleTokenExpired && this.tokenClient) {
+        this.tokenClient.requestAccessToken({ prompt: '' });
+        return;
+      }
+      if (calendar) { this.calendarData = calendar; this.updateCalendarDisplay(); }
+      if (tasks) { this.saveData({ tasks }); }
+    } catch (e) { console.error('Sidebar refresh error:', e); }
   }
 
   // ── Google Identity Services ─────────────────────────────────────────────
@@ -116,6 +178,7 @@ class CirceApp {
           }, refreshIn);
           this.loadConnectionStatus(true);
           this.syncWithGoogle();
+          this.refreshSidebar();
         },
       });
 
@@ -279,6 +342,8 @@ class CirceApp {
 
   async processCommand(text) {
     clearTimeout(this.listenTimeout);
+    // Interrupt any ongoing speech before processing the new command
+    if (speechSynthesis.speaking) speechSynthesis.cancel();
     this.setState('processing', 'Thinking…');
     this.interimEl.textContent = '';
     this.addBubble('user', text);
@@ -307,6 +372,7 @@ class CirceApp {
       if (json.googleTokenExpired && this.tokenClient) {
         this.tokenClient.requestAccessToken({ prompt: '' });
       }
+      if (json.calendar) { this.calendarData = json.calendar; this.updateCalendarDisplay(); }
       this.conversation.push({ role: 'assistant', content: json.response });
 
       // Keep conversation from growing too large
@@ -371,6 +437,7 @@ class CirceApp {
   sendTextInput() {
     const input = document.getElementById('text-input');
     const text = input.value.trim();
+    // Block only if already processing a request (not speaking — speaking can be interrupted)
     if (!text || this.state === 'processing') return;
     input.value = '';
     this.processCommand(text);
@@ -427,7 +494,8 @@ class CirceApp {
     div.className = `message ${who}`;
     div.innerHTML = `<div class="speaker">${who === 'user' ? 'You' : '✦ Circe'}</div>${this.escapeHtml(text)}`;
     this.convEl.appendChild(div);
-    this.convEl.scrollTop = this.convEl.scrollHeight;
+    // Use rAF so the element is in the layout before we scroll
+    requestAnimationFrame(() => div.scrollIntoView({ behavior: 'smooth', block: 'end' }));
   }
 
   escapeHtml(str) {

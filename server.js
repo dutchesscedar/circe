@@ -60,6 +60,17 @@ app.get('/api/connections', (req, res) => {
   });
 });
 
+// Returns live calendar + task data for the sidebar (called on load and after chat)
+app.post('/api/sidebar', async (req, res) => {
+  const { googleToken } = req.body || {};
+  const external = await fetchExternalData(googleToken || null);
+  res.json({
+    calendar: external.calendar,
+    tasks: external.tasks,
+    googleTokenExpired: !!external.googleAuthError,
+  });
+});
+
 // ── Fetch live data from connected services ───────────────────────────────────
 
 async function fetchExternalData(googleToken) {
@@ -437,7 +448,7 @@ app.post('/api/chat', async (req, res) => {
       const text = response.content.find(b => b.type === 'text')?.text || "I'm not sure what to say.";
       const needsConsultant = !useConsultant && text.includes('advisor');
 
-      return res.json({ response: text, localData: updatedLocalData, needsConsultant, model, googleTokenExpired: !!external.googleAuthError });
+      return res.json({ response: text, localData: updatedLocalData, needsConsultant, model, googleTokenExpired: !!external.googleAuthError, calendar: external.calendar });
     }
   } catch(err) {
     console.error('Chat error:', err.message);

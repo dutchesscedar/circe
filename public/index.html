@@ -11,144 +11,144 @@
       font-family: 'Segoe UI', system-ui, sans-serif;
       background: #0f0f1a;
       color: #e8e8f0;
-      min-height: 100vh;
+      height: 100vh;
       display: flex;
       flex-direction: column;
-    }
-
-    header {
-      text-align: center;
-      padding: 24px 20px 16px;
-      border-bottom: 1px solid #2a2a40;
-    }
-
-    header h1 {
-      font-size: 2rem;
-      color: #c084fc;
-      letter-spacing: 0.1em;
-      font-weight: 300;
-    }
-
-    header p {
-      font-size: 0.85rem;
-      color: #6b6b8a;
-      margin-top: 4px;
-    }
-
-    .main {
-      display: flex;
-      flex: 1;
-      gap: 0;
       overflow: hidden;
     }
 
-    /* ── Left panel: voice orb + conversation ── */
-    .voice-panel {
-      flex: 1;
+    /* ── Top bar: orb + name + status + settings ── */
+    .top-bar {
       display: flex;
-      flex-direction: column;
       align-items: center;
-      padding: 32px 24px;
-      overflow: hidden;
+      gap: 14px;
+      padding: 10px 18px;
+      border-bottom: 1px solid #2a2a40;
+      flex-shrink: 0;
     }
 
-    .orb-container {
-      position: relative;
-      width: 160px;
-      height: 160px;
-      margin-bottom: 20px;
+    .orb-wrap {
+      flex-shrink: 0;
     }
 
     .orb {
-      width: 160px;
-      height: 160px;
+      width: 56px;
+      height: 56px;
       border-radius: 50%;
-      background: radial-gradient(circle at 35% 35%, #7c3aed, #1e1b4b);
-      box-shadow: 0 0 30px rgba(124, 58, 237, 0.3);
+      background: radial-gradient(circle at 35% 35%, #4a4a6a, #1a1a2e);
+      box-shadow: 0 0 20px rgba(74, 74, 106, 0.3);
       transition: all 0.4s ease;
       cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 3rem;
+      font-size: 1.4rem;
     }
 
-    .orb:hover { transform: scale(1.05); }
-
-    /* State styles */
-    body.standby .orb {
-      background: radial-gradient(circle at 35% 35%, #4a4a6a, #1a1a2e);
-      box-shadow: 0 0 20px rgba(74, 74, 106, 0.3);
-    }
+    .orb:hover { transform: scale(1.06); }
 
     body.listening .orb {
       background: radial-gradient(circle at 35% 35%, #dc2626, #7f1d1d);
-      box-shadow: 0 0 40px rgba(220, 38, 38, 0.5);
+      box-shadow: 0 0 30px rgba(220, 38, 38, 0.5);
       animation: pulse 1.2s ease-in-out infinite;
     }
-
     body.processing .orb {
       background: radial-gradient(circle at 35% 35%, #d97706, #78350f);
-      box-shadow: 0 0 40px rgba(217, 119, 6, 0.4);
+      box-shadow: 0 0 30px rgba(217, 119, 6, 0.4);
       animation: spin-glow 2s linear infinite;
     }
-
     body.speaking .orb {
       background: radial-gradient(circle at 35% 35%, #7c3aed, #1e1b4b);
-      box-shadow: 0 0 50px rgba(124, 58, 237, 0.6);
+      box-shadow: 0 0 40px rgba(124, 58, 237, 0.6);
       animation: breathe 1.8s ease-in-out infinite;
     }
 
     @keyframes pulse {
-      0%, 100% { transform: scale(1); box-shadow: 0 0 30px rgba(220, 38, 38, 0.4); }
-      50% { transform: scale(1.08); box-shadow: 0 0 60px rgba(220, 38, 38, 0.7); }
+      0%, 100% { transform: scale(1); box-shadow: 0 0 20px rgba(220, 38, 38, 0.4); }
+      50% { transform: scale(1.08); box-shadow: 0 0 50px rgba(220, 38, 38, 0.7); }
     }
-
     @keyframes breathe {
-      0%, 100% { box-shadow: 0 0 40px rgba(124, 58, 237, 0.5); }
-      50% { box-shadow: 0 0 80px rgba(124, 58, 237, 0.8); }
+      0%, 100% { box-shadow: 0 0 30px rgba(124, 58, 237, 0.5); }
+      50% { box-shadow: 0 0 60px rgba(124, 58, 237, 0.8); }
+    }
+    @keyframes spin-glow {
+      0%   { box-shadow: 0 0 20px rgba(217,119,6,.3), 14px 0 20px rgba(217,119,6,.3); }
+      25%  { box-shadow: 0 0 20px rgba(217,119,6,.3), 0 14px 20px rgba(217,119,6,.3); }
+      50%  { box-shadow: 0 0 20px rgba(217,119,6,.3), -14px 0 20px rgba(217,119,6,.3); }
+      75%  { box-shadow: 0 0 20px rgba(217,119,6,.3), 0 -14px 20px rgba(217,119,6,.3); }
+      100% { box-shadow: 0 0 20px rgba(217,119,6,.3), 14px 0 20px rgba(217,119,6,.3); }
     }
 
-    @keyframes spin-glow {
-      0% { box-shadow: 0 0 30px rgba(217, 119, 6, 0.3), 20px 0 30px rgba(217, 119, 6, 0.3); }
-      25% { box-shadow: 0 0 30px rgba(217, 119, 6, 0.3), 0 20px 30px rgba(217, 119, 6, 0.3); }
-      50% { box-shadow: 0 0 30px rgba(217, 119, 6, 0.3), -20px 0 30px rgba(217, 119, 6, 0.3); }
-      75% { box-shadow: 0 0 30px rgba(217, 119, 6, 0.3), 0 -20px 30px rgba(217, 119, 6, 0.3); }
-      100% { box-shadow: 0 0 30px rgba(217, 119, 6, 0.3), 20px 0 30px rgba(217, 119, 6, 0.3); }
+    .top-bar-name {
+      font-size: 1.25rem;
+      color: #c084fc;
+      font-weight: 300;
+      letter-spacing: 0.08em;
+      flex-shrink: 0;
+    }
+
+    .top-bar-status {
+      flex: 1;
+      min-width: 0;
     }
 
     .status-text {
-      font-size: 1.1rem;
+      font-size: 1rem;
       color: #9090b0;
-      text-align: center;
-      min-height: 28px;
       transition: all 0.3s;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .interim-text {
+      font-size: 0.82rem;
+      color: #6060a0;
+      font-style: italic;
+      min-height: 18px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
-    body.listening .status-text { color: #fca5a5; }
+    body.listening .status-text  { color: #fca5a5; }
     body.processing .status-text { color: #fcd34d; }
-    body.speaking .status-text { color: #c084fc; }
+    body.speaking .status-text   { color: #c084fc; }
 
-    .interim-text {
-      font-size: 0.9rem;
-      color: #6060a0;
-      text-align: center;
-      min-height: 22px;
-      font-style: italic;
-      margin-top: 4px;
-      max-width: 300px;
+    .top-bar-settings {
+      flex-shrink: 0;
+      background: none;
+      border: 1px solid #3a3a5a;
+      color: #6b6b8a;
+      border-radius: 8px;
+      padding: 6px 10px;
+      cursor: pointer;
+      font-size: 1rem;
+      transition: all 0.2s;
+    }
+    .top-bar-settings:hover { background: #1e1e3a; color: #c0c0e0; }
+
+    /* ── Main area ── */
+    .main {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ── Conversation panel ── */
+    .voice-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
     }
 
     .conversation {
       flex: 1;
       overflow-y: auto;
-      width: 100%;
-      max-width: 580px;
-      margin-top: 24px;
+      padding: 20px 24px 12px;
       display: flex;
       flex-direction: column;
       gap: 12px;
-      padding-bottom: 16px;
     }
 
     .conversation::-webkit-scrollbar { width: 4px; }
@@ -158,13 +158,13 @@
     .message {
       padding: 12px 16px;
       border-radius: 14px;
-      max-width: 90%;
+      max-width: 88%;
       font-size: 1rem;
       line-height: 1.5;
-      animation: fadeIn 0.3s ease;
+      animation: fadeIn 0.25s ease;
     }
 
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
 
     .message.user {
       background: #1e1e3a;
@@ -172,28 +172,56 @@
       align-self: flex-end;
       color: #d0d0f0;
     }
-
     .message.circe {
       background: #1a1030;
       border: 1px solid #4c1d95;
       align-self: flex-start;
       color: #e0d0ff;
     }
-
     .message .speaker {
-      font-size: 0.72rem;
+      font-size: 0.7rem;
       text-transform: uppercase;
       letter-spacing: 0.08em;
       margin-bottom: 4px;
       opacity: 0.6;
     }
-
-    .message.user .speaker { color: #7878b0; }
+    .message.user .speaker  { color: #7878b0; }
     .message.circe .speaker { color: #a855f7; }
 
-    /* ── Right panel: tasks sidebar ── */
+    /* Manual input */
+    .input-row {
+      display: flex;
+      gap: 8px;
+      padding: 12px 16px;
+      border-top: 1px solid #2a2a40;
+      flex-shrink: 0;
+    }
+    .input-row input {
+      flex: 1;
+      background: #1a1a2e;
+      border: 1px solid #3a3a5a;
+      border-radius: 8px;
+      padding: 9px 13px;
+      color: #e0e0f0;
+      font-size: 0.95rem;
+      outline: none;
+    }
+    .input-row input:focus { border-color: #7c3aed; }
+    .input-row button {
+      background: #7c3aed;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 9px 16px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      transition: background 0.2s;
+    }
+    .input-row button:hover { background: #6d28d9; }
+
+    /* ── Sidebar ── */
     .sidebar {
-      width: 280px;
+      width: 300px;
       background: #13132a;
       border-left: 1px solid #2a2a40;
       display: flex;
@@ -201,114 +229,130 @@
       overflow: hidden;
     }
 
+    .sidebar-inner {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .sidebar-inner::-webkit-scrollbar { width: 3px; }
+    .sidebar-inner::-webkit-scrollbar-thumb { background: #3a3a5a; }
+
     .sidebar-section {
-      padding: 16px;
+      padding: 14px 16px;
       border-bottom: 1px solid #2a2a40;
     }
 
     .sidebar-section h3 {
-      font-size: 0.75rem;
+      font-size: 0.72rem;
       text-transform: uppercase;
       letter-spacing: 0.1em;
       color: #6060a0;
       margin-bottom: 10px;
     }
 
-    #task-list {
-      flex: 1;
-      overflow-y: auto;
-      padding: 12px 16px;
-    }
-
-    #task-list::-webkit-scrollbar { width: 3px; }
-    #task-list::-webkit-scrollbar-thumb { background: #3a3a5a; }
-
+    /* Tasks */
     .task-item {
       display: flex;
       align-items: flex-start;
       gap: 8px;
-      padding: 8px 0;
+      padding: 7px 0;
       border-bottom: 1px solid #1e1e3a;
       font-size: 0.9rem;
       color: #c0c0e0;
       animation: fadeIn 0.3s ease;
     }
-
     .task-item:last-child { border-bottom: none; }
-
-    .task-item .task-bullet {
-      width: 8px;
-      height: 8px;
+    .task-bullet {
+      width: 7px;
+      height: 7px;
       border-radius: 50%;
       background: #7c3aed;
       margin-top: 5px;
       flex-shrink: 0;
     }
-
+    .task-bullet.local { background: #4a4a6a; }
+    .task-label { flex: 1; min-width: 0; }
+    .task-source {
+      font-size: 0.68rem;
+      color: #4a4a6a;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
     .no-tasks {
       font-size: 0.85rem;
       color: #3a3a5a;
       font-style: italic;
-      padding: 8px 0;
+      padding: 4px 0;
     }
+
+    /* Calendar */
+    .cal-day {
+      margin-bottom: 10px;
+    }
+    .cal-day-label {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #7c3aed;
+      margin-bottom: 4px;
+      font-weight: 600;
+    }
+    .cal-day-label.today { color: #c084fc; }
+    .cal-event {
+      display: flex;
+      gap: 8px;
+      align-items: baseline;
+      padding: 4px 0;
+      border-bottom: 1px solid #1a1a30;
+      font-size: 0.85rem;
+      color: #b0b0d0;
+    }
+    .cal-event:last-child { border-bottom: none; }
+    .cal-time {
+      font-size: 0.75rem;
+      color: #6060a0;
+      flex-shrink: 0;
+      min-width: 52px;
+    }
+    .cal-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .no-events {
+      font-size: 0.85rem;
+      color: #3a3a5a;
+      font-style: italic;
+      padding: 4px 0;
+    }
+
+    /* Connected accounts */
+    .sidebar-footer {
+      padding: 12px 16px;
+      border-top: 1px solid #2a2a40;
+      flex-shrink: 0;
+    }
+    .account-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 4px 0;
+      font-size: 0.82rem;
+    }
+    .account-row .connected    { color: #4ade80; }
+    .account-row .disconnected { color: #6b6b8a; }
+    .account-row .unconfigured { color: #3a3a5a; }
+    .account-row a { color: #7c3aed; text-decoration: none; font-size: 0.75rem; }
+    .account-row a:hover { text-decoration: underline; }
 
     /* Error banner */
     #error-banner {
       display: none;
       background: #7f1d1d;
       color: #fca5a5;
-      padding: 10px 20px;
+      padding: 8px 20px;
       text-align: center;
       font-size: 0.9rem;
+      flex-shrink: 0;
     }
-
-    /* Manual input fallback */
-    .input-row {
-      display: flex;
-      gap: 8px;
-      padding: 12px 16px;
-      border-top: 1px solid #2a2a40;
-    }
-
-    .input-row input {
-      flex: 1;
-      background: #1a1a2e;
-      border: 1px solid #3a3a5a;
-      border-radius: 8px;
-      padding: 8px 12px;
-      color: #e0e0f0;
-      font-size: 0.9rem;
-      outline: none;
-    }
-
-    .input-row input:focus { border-color: #7c3aed; }
-
-    .input-row button {
-      background: #7c3aed;
-      color: white;
-      border: none;
-      border-radius: 8px;
-      padding: 8px 14px;
-      cursor: pointer;
-      font-size: 0.85rem;
-      transition: background 0.2s;
-    }
-
-    .input-row button:hover { background: #6d28d9; }
-
-    .account-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 5px 0;
-      font-size: 0.85rem;
-    }
-    .account-row .connected { color: #4ade80; }
-    .account-row .disconnected { color: #6b6b8a; }
-    .account-row .unconfigured { color: #3a3a5a; }
-    .account-row a { color: #7c3aed; text-decoration: none; font-size: 0.78rem; }
-    .account-row a:hover { text-decoration: underline; }
-    .account-row .hint { color: #3a3a5a; font-size: 0.75rem; }
 
     @media (max-width: 640px) {
       .sidebar { display: none; }
@@ -317,68 +361,68 @@
 </head>
 <body class="standby">
 
-<div id="error-banner">⚠️ Voice recognition requires Chrome or Edge. You can still type below.</div>
+<div id="error-banner">Voice recognition requires Chrome or Edge. You can still type below.</div>
 
-<header>
-  <h1>✦ Circe</h1>
-  <p>Kate's personal assistant</p>
-</header>
+<!-- Top bar -->
+<div class="top-bar">
+  <div class="orb-wrap">
+    <div class="orb" id="orb" onclick="app && app.handleOrbClick()" title="Click to activate">✦</div>
+  </div>
+  <span class="top-bar-name">Circe</span>
+  <div class="top-bar-status">
+    <div class="status-text" id="status-text">Say "Hey Circe" to begin</div>
+    <div class="interim-text" id="interim-text"></div>
+  </div>
+  <button class="top-bar-settings" onclick="app && app.openSettings()" title="Settings">⚙</button>
+</div>
 
 <div class="main">
 
-  <!-- Voice panel -->
+  <!-- Conversation panel -->
   <div class="voice-panel">
-    <div class="orb-container">
-      <div class="orb" id="orb" onclick="app && app.handleOrbClick()" title="Click to activate">
-        ✦
-      </div>
-    </div>
-
-    <div class="status-text" id="status-text">Say "Hey Circe" to begin</div>
-    <div class="interim-text" id="interim-text"></div>
-
     <div class="conversation" id="conversation"></div>
-
-    <!-- Text fallback -->
     <div class="input-row">
-      <input type="text" id="text-input" placeholder="Or type a message..." onkeydown="if(event.key==='Enter') app && app.sendTextInput()">
+      <input type="text" id="text-input" placeholder="Or type a message…"
+             onkeydown="if(event.key==='Enter') app && app.sendTextInput()">
       <button onclick="app && app.sendTextInput()">Send</button>
     </div>
   </div>
 
   <!-- Sidebar -->
   <div class="sidebar">
-    <div class="sidebar-section">
-      <h3>📋 Tasks</h3>
-    </div>
-    <div id="task-list">
-      <div class="no-tasks">No tasks yet</div>
+    <div class="sidebar-inner">
+
+      <div class="sidebar-section">
+        <h3>Tasks</h3>
+        <div id="task-list"><div class="no-tasks">No tasks yet</div></div>
+      </div>
+
+      <div class="sidebar-section" id="calendar-section">
+        <h3>Schedule</h3>
+        <div id="calendar-list"><div class="no-events">No upcoming events</div></div>
+      </div>
+
     </div>
 
-    <div class="sidebar-section">
-      <h3>🔗 Connected Accounts</h3>
+    <!-- Accounts pinned at bottom -->
+    <div class="sidebar-footer">
       <div id="accounts-status">
         <div class="account-row"><span class="unconfigured">Loading…</span></div>
       </div>
     </div>
-
-    <div class="sidebar-section" style="border-top: 1px solid #2a2a40; margin-top: auto;">
-      <button class="settings-btn" onclick="app && app.openSettings()">⚙️ Settings</button>
-    </div>
-
   </div>
 
 </div>
 
 <!-- Settings Modal -->
-<div id="settings-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:100; display:none; align-items:center; justify-content:center;">
+<div id="settings-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:100; align-items:center; justify-content:center;">
   <div style="background:#1a1a2e; border:1px solid #3a3a5a; border-radius:16px; padding:28px; width:min(480px,90vw); max-height:90vh; overflow-y:auto;">
-    <h2 style="color:#c084fc; margin-bottom:6px; font-weight:400;">⚙️ Settings</h2>
+    <h2 style="color:#c084fc; margin-bottom:6px; font-weight:400;">Settings</h2>
     <p style="color:#6b6b8a; font-size:0.85rem; margin-bottom:24px;">Enter your Google Client ID to connect your calendar, tasks, and email. Saved only on your computer.</p>
 
     <div class="settings-section">
       <h3>Google <span style="font-weight:300; color:#6b6b8a;">(Calendar, Tasks, Gmail)</span></h3>
-      <p class="settings-hint">Only a Client ID is needed — no secret required! <a href="/setup-google.html" target="_blank">Step-by-step setup guide ↗</a></p>
+      <p class="settings-hint">Only a Client ID is needed — no secret required. <a href="/setup-google.html" target="_blank">Step-by-step setup guide ↗</a></p>
       <label>Client ID</label>
       <input id="s-google-id" type="text" placeholder="ends in .apps.googleusercontent.com">
     </div>
@@ -387,22 +431,15 @@
       <button class="save-btn" onclick="app && app.saveSettings()">Save</button>
       <button class="cancel-btn" onclick="app && app.closeSettings()">Cancel</button>
     </div>
-    <p id="settings-msg" style="margin-top:12px; font-size:0.85rem; color:#4ade80; display:none;">✓ Saved! Now click Connect next to Google.</p>
+    <p id="settings-msg" style="margin-top:12px; font-size:0.85rem; color:#4ade80; display:none;">Saved. Click Connect next to Google.</p>
   </div>
 </div>
 
 <style>
-  .settings-btn {
-    width: 100%; background: #1e1e3a; border: 1px solid #3a3a5a;
-    color: #9090b0; border-radius: 8px; padding: 8px; cursor: pointer;
-    font-size: 0.85rem; transition: all 0.2s;
-  }
-  .settings-btn:hover { background: #2a2a4a; color: #c0c0e0; }
   .settings-section { margin-bottom: 20px; }
   .settings-section h3 { font-size: 0.95rem; color: #e0e0f0; margin-bottom: 6px; }
   .settings-hint { font-size: 0.78rem; color: #6b6b8a; margin-bottom: 10px; line-height: 1.5; }
   .settings-hint a { color: #7c3aed; }
-  .settings-hint code { background: #0f0f1a; padding: 2px 5px; border-radius: 4px; font-size: 0.75rem; color: #c084fc; }
   #settings-modal label { display: block; font-size: 0.78rem; color: #6b6b8a; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.05em; }
   #settings-modal input { width: 100%; background: #0f0f1a; border: 1px solid #3a3a5a; border-radius: 8px; padding: 9px 12px; color: #e0e0f0; font-size: 0.9rem; margin-bottom: 12px; outline: none; }
   #settings-modal input:focus { border-color: #7c3aed; }
