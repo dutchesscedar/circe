@@ -483,7 +483,7 @@ class CirceApp {
     // Brief welcome when the app first loads (no voice, just UI)
     setTimeout(() => {
       if (this.state === 'standby') {
-        this.addBubble('circe', "Hi Kate! I'm Circe. Say \"Hey Circe\" whenever you need me.");
+        this.addBubble('circe', "Hi Duchess! I'm Circe. Say \"Hey Circe\" whenever you need me.");
       }
     }, 800);
   }
