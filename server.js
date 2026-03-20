@@ -11,27 +11,9 @@ app.use(express.static('public'));
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-// ── Microsoft OAuth routes (server-side, needs secret) ────────────────────────
-
-app.get('/auth/microsoft', async (req, res) => {
-  if (!microsoft.isConfigured()) return res.send('Microsoft credentials not configured.');
-  const url = await microsoft.getAuthUrl();
-  res.redirect(url);
-});
-
-app.get('/auth/microsoft/callback', async (req, res) => {
-  try {
-    await microsoft.handleCallback(req.query.code);
-    res.redirect('/?connected=microsoft');
-  } catch(e) {
-    console.error('Microsoft auth error:', e.message);
-    res.redirect('/?error=microsoft');
-  }
-});
-
-app.get('/auth/microsoft/disconnect', (req, res) => {
-  microsoft.disconnect();
-  res.redirect('/');
+// Returns the Microsoft Client ID so the browser can initialize MSAL
+app.get('/api/microsoft-client-id', (req, res) => {
+  res.json({ clientId: microsoft.getClientId() || null });
 });
 
 // ── Settings API (stored in config.json, gitignored) ─────────────────────────
@@ -63,14 +45,14 @@ app.get('/api/google-client-id', (req, res) => {
 
 app.get('/api/connections', (req, res) => {
   res.json({
-    google: { configured: google.isConfigured() },
-    microsoft: { configured: microsoft.isConfigured(), connected: microsoft.isConnected() },
+    google:    { configured: google.isConfigured() },
+    microsoft: { configured: microsoft.isConfigured() },
   });
 });
 
 // ── Fetch live data from connected services ───────────────────────────────────
 
-async function fetchExternalData(googleToken) {
+async function fetchExternalData(googleToken, microsoftToken) {
   const result = { calendar: [], tasks: [], emails: [], sources: [] };
 
   if (googleToken && google.isConfigured()) {
@@ -87,12 +69,12 @@ async function fetchExternalData(googleToken) {
     } catch(e) { console.error('Google fetch error:', e.message); }
   }
 
-  if (microsoft.isConnected()) {
+  if (microsoftToken && microsoft.isConfigured()) {
     try {
       const [cal, tasks, emails] = await Promise.all([
-        microsoft.getCalendarEvents(7),
-        microsoft.getTasks(),
-        microsoft.getRecentEmails(5),
+        microsoft.getCalendarEvents(microsoftToken, 7),
+        microsoft.getTasks(microsoftToken),
+        microsoft.getRecentEmails(microsoftToken, 5),
       ]);
       result.calendar.push(...cal);
       result.tasks.push(...tasks);
@@ -333,15 +315,15 @@ function runLocalTool(name, input, localData) {
   return { result: 'Done' };
 }
 
-async function runExternalTool(name, input, googleToken) {
+async function runExternalTool(name, input, googleToken, microsoftToken) {
   try {
     if (name === 'create_calendar_event') {
       if (googleToken && google.isConfigured()) {
         await google.createCalendarEvent(googleToken, input);
         return `Added to Google Calendar: "${input.title}"`;
       }
-      if (microsoft.isConnected()) {
-        await microsoft.createCalendarEvent(input);
+      if (microsoftToken && microsoft.isConfigured()) {
+        await microsoft.createCalendarEvent(microsoftToken, input);
         return `Added to Outlook: "${input.title}"`;
       }
       return 'No calendar connected. Used local schedule instead.';
@@ -352,8 +334,8 @@ async function runExternalTool(name, input, googleToken) {
         await google.createTask(googleToken, input);
         return `Added to Google Tasks: "${input.title}"`;
       }
-      if (microsoft.isConnected()) {
-        await microsoft.createTask(input);
+      if (microsoftToken && microsoft.isConfigured()) {
+        await microsoft.createTask(microsoftToken, input);
         return `Added to Microsoft To Do: "${input.title}"`;
       }
       return 'No task service connected.';
@@ -364,8 +346,8 @@ async function runExternalTool(name, input, googleToken) {
         await google.completeTask(googleToken, input.task_id);
         return 'Task marked complete in Google Tasks.';
       }
-      if (input.source === 'microsoft' && microsoft.isConnected()) {
-        await microsoft.completeTask(input.task_id);
+      if (input.source === 'microsoft' && microsoftToken) {
+        await microsoft.completeTask(microsoftToken, input.task_id);
         return 'Task marked complete in Microsoft To Do.';
       }
       return 'Could not complete task.';
@@ -376,8 +358,8 @@ async function runExternalTool(name, input, googleToken) {
         await google.deleteCalendarEvent(googleToken, input.event_id);
         return `Deleted from Google Calendar: "${input.title || input.event_id}"`;
       }
-      if (input.source === 'microsoft' && microsoft.isConnected()) {
-        await microsoft.deleteCalendarEvent(input.event_id);
+      if (input.source === 'microsoft' && microsoftToken) {
+        await microsoft.deleteCalendarEvent(microsoftToken, input.event_id);
         return `Deleted from Outlook: "${input.title || input.event_id}"`;
       }
       return 'No calendar connected.';
@@ -394,11 +376,11 @@ async function runExternalTool(name, input, googleToken) {
 // ── Chat endpoint ─────────────────────────────────────────────────────────────
 
 app.post('/api/chat', async (req, res) => {
-  const { messages, localData = {}, googleToken, useConsultant = false } = req.body;
+  const { messages, localData = {}, googleToken, microsoftToken, useConsultant = false } = req.body;
   const model = useConsultant ? 'claude-opus-4-6' : 'claude-sonnet-4-6';
 
   try {
-    const external = await fetchExternalData(googleToken);
+    const external = await fetchExternalData(googleToken, microsoftToken);
     const systemPrompt = buildSystemPrompt(localData, external);
 
     let currentMessages = [...messages];
@@ -431,7 +413,7 @@ app.post('/api/chat', async (req, res) => {
             if (outcome.schedule) updatedLocalData.schedule = outcome.schedule;
             resultText = outcome.result;
           } else {
-            resultText = await runExternalTool(tb.name, tb.input, googleToken);
+            resultText = await runExternalTool(tb.name, tb.input, googleToken, microsoftToken);
           }
           results.push({ type: 'tool_result', tool_use_id: tb.id, content: resultText });
         }
@@ -456,5 +438,5 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`\n✨ Circe is running at http://localhost:${PORT}\n`);
   if (google.isConfigured()) console.log('  ✓ Google Client ID configured');
-  if (microsoft.isConnected()) console.log('  ✓ Microsoft connected');
+  if (microsoft.isConfigured()) console.log('  ✓ Microsoft Client ID configured');
 });

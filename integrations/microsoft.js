@@ -1,91 +1,16 @@
-const msal = require('@azure/msal-node');
+// Microsoft Graph integration — uses browser-based MSAL.js OAuth.
+// The access token comes from the browser and is passed with each /api/chat request.
+// No client secret needed — only a Client ID.
+
 const axios = require('axios');
-const fs = require('fs');
-const path = require('path');
 const config = require('../config');
 
-const TOKENS_FILE = path.join(__dirname, '../tokens.json');
-const REDIRECT_URI = 'http://localhost:3000/auth/microsoft/callback';
-const SCOPES = ['Calendars.ReadWrite', 'Mail.Read', 'Tasks.ReadWrite', 'User.Read', 'offline_access'];
-
-function loadTokens() {
-  try { return JSON.parse(fs.readFileSync(TOKENS_FILE, 'utf8')); } catch(e) { return {}; }
-}
-
-function saveTokens(data) {
-  fs.writeFileSync(TOKENS_FILE, JSON.stringify(data, null, 2));
+function getClientId() {
+  return config.get('MICROSOFT_CLIENT_ID');
 }
 
 function isConfigured() {
-  return !!(config.get('MICROSOFT_CLIENT_ID') && config.get('MICROSOFT_CLIENT_SECRET'));
-}
-
-function isConnected() {
-  return isConfigured() && !!loadTokens().microsoft?.msalCache;
-}
-
-// Cache plugin that persists MSAL token cache to tokens.json
-const cachePlugin = {
-  async beforeCacheAccess(ctx) {
-    const stored = loadTokens();
-    if (stored.microsoft?.msalCache) ctx.tokenCache.deserialize(stored.microsoft.msalCache);
-  },
-  async afterCacheAccess(ctx) {
-    if (ctx.cacheHasChanged) {
-      const stored = loadTokens();
-      if (!stored.microsoft) stored.microsoft = {};
-      stored.microsoft.msalCache = ctx.tokenCache.serialize();
-      saveTokens(stored);
-    }
-  },
-};
-
-function makePca() {
-  return new msal.ConfidentialClientApplication({
-    auth: {
-      clientId: config.get('MICROSOFT_CLIENT_ID'),
-      clientSecret: config.get('MICROSOFT_CLIENT_SECRET'),
-      authority: 'https://login.microsoftonline.com/common',
-    },
-    cache: { cachePlugin },
-  });
-}
-
-async function getAuthUrl() {
-  const pca = makePca();
-  return pca.getAuthCodeUrl({ scopes: SCOPES, redirectUri: REDIRECT_URI });
-}
-
-async function handleCallback(code) {
-  const pca = makePca();
-  const result = await pca.acquireTokenByCode({ code, scopes: SCOPES, redirectUri: REDIRECT_URI });
-  // Account info saved via cachePlugin afterCacheAccess
-  const stored = loadTokens();
-  if (!stored.microsoft) stored.microsoft = {};
-  stored.microsoft.homeAccountId = result.account.homeAccountId;
-  saveTokens(stored);
-}
-
-function disconnect() {
-  const stored = loadTokens();
-  delete stored.microsoft;
-  saveTokens(stored);
-}
-
-async function getAccessToken() {
-  if (!isConnected()) return null;
-  const pca = makePca();
-  const accounts = await pca.getTokenCache().getAllAccounts();
-  const stored = loadTokens();
-  const account = accounts.find(a => a.homeAccountId === stored.microsoft?.homeAccountId) || accounts[0];
-  if (!account) return null;
-  try {
-    const result = await pca.acquireTokenSilent({ account, scopes: SCOPES });
-    return result.accessToken;
-  } catch(e) {
-    console.error('Microsoft silent token refresh failed:', e.message);
-    return null;
-  }
+  return !!getClientId();
 }
 
 async function graph(method, endpoint, token, body) {
@@ -99,12 +24,12 @@ async function graph(method, endpoint, token, body) {
 }
 
 // Returns normalized events: { id, title, start, end, location, source }
-async function getCalendarEvents(days = 7) {
-  const token = await getAccessToken();
-  if (!token) return [];
+async function getCalendarEvents(accessToken, days = 7) {
   const now = new Date().toISOString();
   const end = new Date(Date.now() + days * 86400000).toISOString();
-  const res = await graph('GET', `/me/calendarView?startDateTime=${now}&endDateTime=${end}&$orderby=start/dateTime&$top=20&$select=id,subject,start,end,location`, token);
+  const res = await graph('GET',
+    `/me/calendarView?startDateTime=${now}&endDateTime=${end}&$orderby=start/dateTime&$top=20&$select=id,subject,start,end,location`,
+    accessToken);
   return (res.value || []).map(e => ({
     id: e.id,
     title: e.subject || '(no title)',
@@ -115,26 +40,31 @@ async function getCalendarEvents(days = 7) {
   }));
 }
 
-async function createCalendarEvent({ title, start, end, location, description }) {
-  const token = await getAccessToken();
-  if (!token) throw new Error('Microsoft not connected');
-  await graph('POST', '/me/events', token, {
+async function createCalendarEvent(accessToken, { title, start, end, location, description }) {
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  await graph('POST', '/me/events', accessToken, {
     subject: title,
     body: { contentType: 'Text', content: description || '' },
     location: { displayName: location || '' },
-    start: { dateTime: start, timeZone: 'America/New_York' },
-    end: { dateTime: end || new Date(new Date(start).getTime() + 3600000).toISOString(), timeZone: 'America/New_York' },
+    start: { dateTime: start, timeZone },
+    end: { dateTime: end || new Date(new Date(start).getTime() + 3600000).toISOString(), timeZone },
+  });
+}
+
+async function deleteCalendarEvent(accessToken, eventId) {
+  await axios.delete(`https://graph.microsoft.com/v1.0/me/events/${eventId}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
   });
 }
 
 // Returns normalized tasks: { id, title, notes, due, source }
-async function getTasks() {
-  const token = await getAccessToken();
-  if (!token) return [];
-  const lists = await graph('GET', '/me/todo/lists?$top=1', token);
+async function getTasks(accessToken) {
+  const lists = await graph('GET', '/me/todo/lists?$top=1', accessToken);
   if (!lists.value?.length) return [];
   const listId = lists.value[0].id;
-  const res = await graph('GET', `/me/todo/lists/${listId}/tasks?$filter=status ne 'completed'&$top=20&$select=id,title,body,dueDateTime`, token);
+  const res = await graph('GET',
+    `/me/todo/lists/${listId}/tasks?$filter=status ne 'completed'&$top=20&$select=id,title,body,dueDateTime`,
+    accessToken);
   return (res.value || []).map(t => ({
     id: t.id,
     title: t.title,
@@ -144,32 +74,30 @@ async function getTasks() {
   }));
 }
 
-async function createTask({ title, notes }) {
-  const token = await getAccessToken();
-  if (!token) throw new Error('Microsoft not connected');
-  const lists = await graph('GET', '/me/todo/lists?$top=1', token);
+async function createTask(accessToken, { title, notes, due }) {
+  const lists = await graph('GET', '/me/todo/lists?$top=1', accessToken);
   if (!lists.value?.length) return;
   const listId = lists.value[0].id;
-  await graph('POST', `/me/todo/lists/${listId}/tasks`, token, {
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  await graph('POST', `/me/todo/lists/${listId}/tasks`, accessToken, {
     title,
     body: { content: notes || '', contentType: 'text' },
+    ...(due ? { dueDateTime: { dateTime: due, timeZone } } : {}),
   });
 }
 
-async function completeTask(taskId) {
-  const token = await getAccessToken();
-  if (!token) throw new Error('Microsoft not connected');
-  const lists = await graph('GET', '/me/todo/lists?$top=1', token);
+async function completeTask(accessToken, taskId) {
+  const lists = await graph('GET', '/me/todo/lists?$top=1', accessToken);
   if (!lists.value?.length) return;
   const listId = lists.value[0].id;
-  await graph('PATCH', `/me/todo/lists/${listId}/tasks/${taskId}`, token, { status: 'completed' });
+  await graph('PATCH', `/me/todo/lists/${listId}/tasks/${taskId}`, accessToken, { status: 'completed' });
 }
 
 // Returns normalized emails: { id, subject, from, date, source }
-async function getRecentEmails(max = 5) {
-  const token = await getAccessToken();
-  if (!token) return [];
-  const res = await graph('GET', `/me/messages?$filter=isRead eq false&$top=${max}&$select=id,subject,from,receivedDateTime&$orderby=receivedDateTime desc`, token);
+async function getRecentEmails(accessToken, max = 5) {
+  const res = await graph('GET',
+    `/me/messages?$filter=isRead eq false&$top=${max}&$select=id,subject,from,receivedDateTime&$orderby=receivedDateTime desc`,
+    accessToken);
   return (res.value || []).map(e => ({
     id: e.id,
     subject: e.subject || '(no subject)',
@@ -180,8 +108,13 @@ async function getRecentEmails(max = 5) {
 }
 
 module.exports = {
-  isConfigured, isConnected, getAuthUrl, handleCallback, disconnect,
-  getCalendarEvents, createCalendarEvent,
-  getTasks, createTask, completeTask,
+  isConfigured,
+  getClientId,
+  getCalendarEvents,
+  createCalendarEvent,
+  deleteCalendarEvent,
+  getTasks,
+  createTask,
+  completeTask,
   getRecentEmails,
 };

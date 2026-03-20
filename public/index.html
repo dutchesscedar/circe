@@ -385,11 +385,9 @@
 
     <div class="settings-section">
       <h3>Microsoft <span style="font-weight:300; color:#6b6b8a;">(Outlook, To Do, Mail)</span></h3>
-      <p class="settings-hint">Get these at <a href="https://portal.azure.com" target="_blank">portal.azure.com</a> → App registrations → New registration.<br>Set redirect URI to: <code>http://localhost:3000/auth/microsoft/callback</code></p>
+      <p class="settings-hint">Only a Client ID is needed — no secret required! <a href="/setup-microsoft.html" target="_blank">Step-by-step setup guide</a></p>
       <label>Client ID</label>
       <input id="s-ms-id" type="text" placeholder="paste your Microsoft Client ID">
-      <label>Client Secret</label>
-      <input id="s-ms-secret" type="password" placeholder="paste your Microsoft Client Secret">
     </div>
 
     <div style="display:flex; gap:10px; margin-top:20px;">
@@ -422,6 +420,7 @@
 </style>
 
 <script src="https://accounts.google.com/gsi/client" async></script>
+<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js" async></script>
 <script src="app.js"></script>
 </body>
 </html>
