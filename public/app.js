@@ -10,9 +10,10 @@ class CirceApp {
     this.data = this.loadData();
     this.useConsultant = false;
 
-    // Google token (short-lived, from GIS; refreshed when expired)
+    // Google token (short-lived, from GIS; refreshed automatically)
     this.googleToken = sessionStorage.getItem('google_token') || null;
     this.tokenClient = null;
+    this.tokenRefreshTimer = null;
 
     this.statusEl = document.getElementById('status-text');
     this.interimEl = document.getElementById('interim-text');
@@ -103,6 +104,12 @@ class CirceApp {
           }
           this.googleToken = response.access_token;
           sessionStorage.setItem('google_token', response.access_token);
+          // Schedule a silent refresh 5 minutes before the token expires
+          clearTimeout(this.tokenRefreshTimer);
+          const refreshIn = ((response.expires_in || 3600) - 300) * 1000;
+          this.tokenRefreshTimer = setTimeout(() => {
+            this.tokenClient.requestAccessToken({ prompt: '' });
+          }, refreshIn);
           this.loadConnectionStatus(true);
           this.syncWithGoogle();
         },
@@ -288,10 +295,8 @@ class CirceApp {
       const json = await res.json();
 
       if (json.localData) this.saveData(json.localData);
-      if (json.googleTokenExpired) {
-        this.googleToken = null;
-        sessionStorage.removeItem('google_token');
-        this.loadConnectionStatus(false);
+      if (json.googleTokenExpired && this.tokenClient) {
+        this.tokenClient.requestAccessToken({ prompt: '' });
       }
       this.conversation.push({ role: 'assistant', content: json.response });
 
