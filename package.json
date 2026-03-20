@@ -1,0 +1,14 @@
+{
+  "name": "circe",
+  "version": "1.0.0",
+  "description": "Kate's personal voice assistant",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.54.0",
+    "dotenv": "^17.3.1",
+    "express": "^4.18.2"
+  }
+}
