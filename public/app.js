@@ -186,8 +186,9 @@ class CirceApp {
     const combined = (final + interim).toLowerCase().trim();
 
     if (this.state === 'standby') {
-      // Watch for wake word
-      if (combined.includes('circe')) {
+      // Watch for wake word — include phonetic mishearings of "Circe"
+      const wakeWords = ['circe', 'surce', 'searcy', 'searsy', 'sirsy', 'percy', 'mercy', 'sir-c', 'sirc'];
+      if (wakeWords.some(w => combined.includes(w))) {
         this.activate();
       }
     } else if (this.state === 'listening') {
@@ -340,14 +341,24 @@ class CirceApp {
       try { this.recognition.stop(); } catch(e) {}
 
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 0.92;
-      utterance.pitch = 1.05;
+      utterance.rate = 0.9;
+      utterance.pitch = 1.0;
       utterance.volume = 1.0;
 
-      // Prefer a natural-sounding voice
       const voices = speechSynthesis.getVoices();
-      const preferred = voices.find(v => v.name.includes('Samantha') || v.name.includes('Karen') || v.name.includes('Moira'))
-        || voices.find(v => v.lang === 'en-US' && !v.name.includes('(Google)'));
+      const enVoices = voices.filter(v => v.lang.startsWith('en'));
+
+      // Priority: Enhanced/Premium > specific natural names > any local en-US > any en
+      const preferred =
+        enVoices.find(v => v.name.includes('Enhanced') && v.name.includes('Samantha')) ||
+        enVoices.find(v => v.name.includes('Enhanced') && v.name.includes('Ava')) ||
+        enVoices.find(v => v.name.includes('Enhanced')) ||
+        enVoices.find(v => v.name.includes('Premium')) ||
+        enVoices.find(v => v.name === 'Samantha') ||
+        enVoices.find(v => v.name === 'Karen') ||
+        enVoices.find(v => v.name === 'Moira') ||
+        enVoices.find(v => v.lang === 'en-US' && v.localService && !v.name.includes('Google')) ||
+        enVoices.find(v => v.lang === 'en-US');
       if (preferred) utterance.voice = preferred;
 
       utterance.onend = () => {
@@ -491,6 +502,13 @@ class CirceApp {
     }, 800);
   }
 }
+
+// ── Debug helper: run listVoices() in browser console to see available voices ─
+window.listVoices = () => {
+  speechSynthesis.getVoices()
+    .filter(v => v.lang.startsWith('en'))
+    .forEach(v => console.log(`${v.name} | ${v.lang} | local:${v.localService}`));
+};
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
