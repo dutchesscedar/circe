@@ -28,7 +28,6 @@ A voice-activated web app named Circe. Activated by saying "Hey Circe". Always r
 - Wake word detection ("Hey Circe")
 - Task manager, student tracker, daily schedule
 - Google Calendar / Tasks / Gmail integration (browser-based GIS OAuth)
-- Microsoft Outlook Calendar / To Do / Mail integration (server-side OAuth)
 - Two-model Claude setup: fast replies + expert consultant escalation
 - Saves data to localStorage (local) and external services (when connected)
 
@@ -41,7 +40,6 @@ A voice-activated web app named Circe. Activated by saying "Hey Circe". Always r
 
 - `ANTHROPIC_API_KEY` lives in `.env` (gitignored)
 - Google Client ID lives in `.env` as `GOOGLE_CLIENT_ID` (gitignored)
-- Microsoft credentials live in `.env` as `MICROSOFT_CLIENT_ID` / `MICROSOFT_CLIENT_SECRET` (gitignored)
 - Settings UI saves to `config.json` (also gitignored), which takes priority over `.env`
 - Google access token is short-lived (1 hr), stored in sessionStorage, refreshed via GIS
 
@@ -50,7 +48,6 @@ A voice-activated web app named Circe. Activated by saying "Hey Circe". Always r
 - `server.js` — Express server, Claude API proxy, tool execution, OAuth routes
 - `config.js` — reads config.json then falls back to .env
 - `integrations/google.js` — Google APIs using browser-issued GIS access token
-- `integrations/microsoft.js` — Microsoft Graph API via MSAL (server-side)
 - `public/index.html` — main UI
 - `public/app.js` — frontend: voice, GIS sign-in, chat
 - `public/setup-google.html` — friendly Google Client ID setup guide

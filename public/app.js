@@ -14,11 +14,6 @@ class CirceApp {
     this.googleToken = sessionStorage.getItem('google_token') || null;
     this.tokenClient = null;
 
-    // Microsoft token (short-lived, from MSAL; refreshed silently)
-    this.microsoftToken = null;
-    this.msalInstance = null;
-    this.msalAccount = JSON.parse(sessionStorage.getItem('microsoft_account') || 'null');
-
     this.statusEl = document.getElementById('status-text');
     this.interimEl = document.getElementById('interim-text');
     this.convEl = document.getElementById('conversation');
@@ -26,7 +21,6 @@ class CirceApp {
 
     this.updateTaskDisplay();
     this.initGoogle();      // sets up GIS, then loads connection status
-    this.initMicrosoft();   // sets up MSAL
 
     if (!SpeechRecognition) {
       document.getElementById('error-banner').style.display = 'block';
@@ -139,104 +133,6 @@ class CirceApp {
       return;
     }
     this.tokenClient.requestAccessToken();
-  }
-
-  // ── Microsoft MSAL ───────────────────────────────────────────────────────────
-
-  async initMicrosoft() {
-    try {
-      const res = await fetch('/api/microsoft-client-id');
-      const { clientId } = await res.json();
-      if (!clientId) return;
-
-      await this.waitForMSAL();
-
-      this.msalInstance = new msal.PublicClientApplication({
-        auth: {
-          clientId,
-          authority: 'https://login.microsoftonline.com/consumers',
-          redirectUri: window.location.origin,
-        },
-        cache: { cacheLocation: 'sessionStorage', storeAuthStateInCookie: false },
-      });
-
-      // If we have a stored account, get a token silently right away
-      if (this.msalAccount) {
-        try {
-          const result = await this.msalInstance.acquireTokenSilent({
-            scopes: this.msalScopes(),
-            account: this.msalAccount,
-          });
-          this.microsoftToken = result.accessToken;
-        } catch(e) {
-          // Silent refresh failed — user will need to click Connect again
-          this.msalAccount = null;
-          sessionStorage.removeItem('microsoft_account');
-        }
-      }
-
-      this.loadConnectionStatus(!!this.googleToken);
-    } catch(e) {
-      console.error('Microsoft init error:', e);
-    }
-  }
-
-  waitForMSAL() {
-    return new Promise((resolve) => {
-      if (window.msal) { resolve(); return; }
-      const interval = setInterval(() => {
-        if (window.msal) { clearInterval(interval); resolve(); }
-      }, 100);
-      setTimeout(() => { clearInterval(interval); resolve(); }, 5000);
-    });
-  }
-
-  msalScopes() {
-    return ['Calendars.ReadWrite', 'Tasks.ReadWrite', 'Mail.Read', 'User.Read'];
-  }
-
-  async connectMicrosoft() {
-    if (!this.msalInstance) {
-      alert('Microsoft Client ID not configured. Click the setup guide link above.');
-      return;
-    }
-    try {
-      const result = await this.msalInstance.loginPopup({ scopes: this.msalScopes() });
-      this.msalAccount = result.account;
-      sessionStorage.setItem('microsoft_account', JSON.stringify(result.account));
-      const tokenResult = await this.msalInstance.acquireTokenSilent({
-        scopes: this.msalScopes(),
-        account: result.account,
-      });
-      this.microsoftToken = tokenResult.accessToken;
-      this.loadConnectionStatus(!!this.googleToken);
-    } catch(e) {
-      console.error('Microsoft sign-in error:', e);
-    }
-  }
-
-  async getMicrosoftToken() {
-    if (!this.msalInstance || !this.msalAccount) return null;
-    try {
-      const result = await this.msalInstance.acquireTokenSilent({
-        scopes: this.msalScopes(),
-        account: this.msalAccount,
-      });
-      this.microsoftToken = result.accessToken;
-      return result.accessToken;
-    } catch(e) {
-      // Token expired and can't refresh silently — ask user to reconnect
-      this.microsoftToken = null;
-      return null;
-    }
-  }
-
-  disconnectMicrosoft() {
-    this.microsoftToken = null;
-    this.msalAccount = null;
-    sessionStorage.removeItem('microsoft_account');
-    if (this.msalInstance) this.msalInstance.clearCache();
-    this.loadConnectionStatus(!!this.googleToken);
   }
 
   disconnectGoogle() {
@@ -354,7 +250,6 @@ class CirceApp {
           messages: this.conversation,
           localData: this.data,
           googleToken: this.googleToken,
-          microsoftToken: await this.getMicrosoftToken(),
           useConsultant: this.useConsultant
         })
       });
@@ -406,7 +301,6 @@ class CirceApp {
           messages: this.conversation,
           localData: this.data,
           googleToken: this.googleToken,
-          microsoftToken: await this.getMicrosoftToken(),
           useConsultant: true
         })
       });
@@ -520,7 +414,6 @@ class CirceApp {
       const res = await fetch('/api/settings');
       const s = await res.json();
       document.getElementById('s-google-id').value = s.GOOGLE_CLIENT_ID || '';
-      document.getElementById('s-ms-id').value = s.MICROSOFT_CLIENT_ID || '';
     } catch(e) {}
   }
 
@@ -530,8 +423,7 @@ class CirceApp {
 
   async saveSettings() {
     const body = {
-      GOOGLE_CLIENT_ID:    document.getElementById('s-google-id').value,
-      MICROSOFT_CLIENT_ID: document.getElementById('s-ms-id').value,
+      GOOGLE_CLIENT_ID: document.getElementById('s-google-id').value,
     };
     await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     document.getElementById('settings-msg').style.display = 'block';
@@ -543,8 +435,7 @@ class CirceApp {
     const el = document.getElementById('accounts-status');
     if (!el) return;
 
-    // Check if Google client ID is configured
-    fetch('/api/connections').then(r => r.json()).then(({ google, microsoft }) => {
+    fetch('/api/connections').then(r => r.json()).then(({ google }) => {
       const gConnected = googleConnected !== undefined ? googleConnected : !!this.googleToken;
       const gConfigured = google.configured;
 
@@ -566,27 +457,7 @@ class CirceApp {
         </div>`;
       }
 
-      const msConfigured = microsoft.configured;
-      const msConnected = !!this.msalAccount;
-      let msHtml;
-      if (!msConfigured) {
-        msHtml = `<div class="account-row">
-          <span class="unconfigured">✗ Microsoft</span>
-          <a href="/setup-microsoft.html">Set up</a>
-        </div>`;
-      } else if (msConnected) {
-        msHtml = `<div class="account-row">
-          <span class="connected">✓ Microsoft</span>
-          <a href="#" onclick="app.disconnectMicrosoft(); return false;">Disconnect</a>
-        </div>`;
-      } else {
-        msHtml = `<div class="account-row">
-          <span class="disconnected">○ Microsoft</span>
-          <a href="#" onclick="app.connectMicrosoft(); return false;">Connect</a>
-        </div>`;
-      }
-
-      el.innerHTML = googleHtml + msHtml;
+      el.innerHTML = googleHtml;
     }).catch(() => {});
   }
 
