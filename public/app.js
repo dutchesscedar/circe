@@ -288,6 +288,11 @@ class CirceApp {
       const json = await res.json();
 
       if (json.localData) this.saveData(json.localData);
+      if (json.googleTokenExpired) {
+        this.googleToken = null;
+        sessionStorage.removeItem('google_token');
+        this.loadConnectionStatus(false);
+      }
       this.conversation.push({ role: 'assistant', content: json.response });
 
       // Keep conversation from growing too large

@@ -76,7 +76,11 @@ async function fetchExternalData(googleToken) {
       result.tasks.push(...tasks);
       result.emails.push(...emails);
       result.sources.push('Google Calendar, Google Tasks, Gmail');
-    } catch(e) { console.error('Google fetch error:', e.message); }
+    } catch(e) {
+      console.error('Google fetch error:', e.message);
+      const status = e.code || e.status || (e.response && e.response.status);
+      if (status === 401 || status === 403) result.googleAuthError = true;
+    }
   }
 
   result.calendar.sort((a, b) => new Date(a.start) - new Date(b.start));
@@ -433,7 +437,7 @@ app.post('/api/chat', async (req, res) => {
       const text = response.content.find(b => b.type === 'text')?.text || "I'm not sure what to say.";
       const needsConsultant = !useConsultant && text.includes('advisor');
 
-      return res.json({ response: text, localData: updatedLocalData, needsConsultant, model });
+      return res.json({ response: text, localData: updatedLocalData, needsConsultant, model, googleTokenExpired: !!external.googleAuthError });
     }
   } catch(err) {
     console.error('Chat error:', err.message);
