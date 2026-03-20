@@ -301,12 +301,11 @@ class CirceApp {
 
       // Process final result
       if (final.trim()) {
-        // Don't process the wake word itself as a command
-        const cleaned = final.trim().toLowerCase()
-          .replace(/^(hey\s+)?circe[,.]?\s*/i, '')
-          .trim();
+        // Strip any variant of the wake word before sending to Circe
+        const wakePattern = /^(hey\s+)?(circe|surce|searcy|searsy|sirsy|percy|mercy|sir-c|sirc)[,.]?\s*/i;
+        const cleaned = final.trim().replace(wakePattern, '').trim();
         if (cleaned.length > 1) {
-          this.processCommand(final.trim());
+          this.processCommand(cleaned);
         }
       }
     }
