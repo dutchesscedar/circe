@@ -1,6 +1,8 @@
 require('dotenv').config();
 const express = require('express');
 const Anthropic = require('@anthropic-ai/sdk');
+const google = require('./integrations/google');
+const microsoft = require('./integrations/microsoft');
 
 const app = express();
 app.use(express.json());
@@ -8,106 +10,291 @@ app.use(express.static('public'));
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-function buildSystemPrompt(data) {
-  const tasks = (data.tasks || []).filter(t => !t.done);
-  const studentNames = Object.keys(data.students || {});
-  const today = new Date().toISOString().split('T')[0];
-  const todayEvents = (data.schedule || []).filter(e => e.date === today);
-  const upcomingEvents = (data.schedule || [])
-    .filter(e => e.date >= today)
-    .slice(0, 5);
+// ── OAuth routes ──────────────────────────────────────────────────────────────
+
+app.get('/auth/google', (req, res) => {
+  if (!google.isConfigured()) return res.send('Google credentials not configured in .env');
+  res.redirect(google.getAuthUrl());
+});
+
+app.get('/auth/google/callback', async (req, res) => {
+  try {
+    await google.handleCallback(req.query.code);
+    res.redirect('/?connected=google');
+  } catch(e) {
+    console.error('Google auth error:', e.message);
+    res.redirect('/?error=google');
+  }
+});
+
+app.get('/auth/google/disconnect', (req, res) => {
+  google.disconnect();
+  res.redirect('/');
+});
+
+app.get('/auth/microsoft', async (req, res) => {
+  if (!microsoft.isConfigured()) return res.send('Microsoft credentials not configured in .env');
+  const url = await microsoft.getAuthUrl();
+  res.redirect(url);
+});
+
+app.get('/auth/microsoft/callback', async (req, res) => {
+  try {
+    await microsoft.handleCallback(req.query.code);
+    res.redirect('/?connected=microsoft');
+  } catch(e) {
+    console.error('Microsoft auth error:', e.message);
+    res.redirect('/?error=microsoft');
+  }
+});
+
+app.get('/auth/microsoft/disconnect', (req, res) => {
+  microsoft.disconnect();
+  res.redirect('/');
+});
+
+app.get('/api/connections', (req, res) => {
+  res.json({
+    google: { configured: google.isConfigured(), connected: google.isConnected() },
+    microsoft: { configured: microsoft.isConfigured(), connected: microsoft.isConnected() },
+  });
+});
+
+// ── Fetch live data from connected services ───────────────────────────────────
+
+async function fetchExternalData() {
+  const result = { calendar: [], tasks: [], emails: [], sources: [] };
+
+  if (google.isConnected()) {
+    try {
+      const [cal, tasks, emails] = await Promise.all([
+        google.getCalendarEvents(7),
+        google.getTasks(),
+        google.getRecentEmails(5),
+      ]);
+      result.calendar.push(...cal);
+      result.tasks.push(...tasks);
+      result.emails.push(...emails);
+      result.sources.push('Google Calendar, Google Tasks, Gmail');
+    } catch(e) { console.error('Google fetch error:', e.message); }
+  }
+
+  if (microsoft.isConnected()) {
+    try {
+      const [cal, tasks, emails] = await Promise.all([
+        microsoft.getCalendarEvents(7),
+        microsoft.getTasks(),
+        microsoft.getRecentEmails(5),
+      ]);
+      result.calendar.push(...cal);
+      result.tasks.push(...tasks);
+      result.emails.push(...emails);
+      result.sources.push('Outlook Calendar, Microsoft To Do, Outlook Mail');
+    } catch(e) { console.error('Microsoft fetch error:', e.message); }
+  }
+
+  // Sort calendar by start time
+  result.calendar.sort((a, b) => new Date(a.start) - new Date(b.start));
+
+  return result;
+}
+
+// ── System prompt ─────────────────────────────────────────────────────────────
+
+function buildSystemPrompt(localData, external) {
+  const today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  // Merge tasks: external takes priority if connected
+  const showTasks = external.tasks.length > 0 ? external.tasks : (localData.tasks || []).filter(t => !t.done);
+  const showCalendar = external.calendar.length > 0 ? external.calendar : (localData.schedule || []);
+  const todayEvents = showCalendar.filter(e => {
+    const d = (e.start || e.date || '').slice(0, 10);
+    return d === todayStr;
+  });
+
+  const connections = external.sources.length > 0
+    ? `Connected: ${external.sources.join(', ')}`
+    : 'No external accounts connected — using local storage only';
+
+  const taskList = showTasks.length > 0
+    ? showTasks.map((t, i) => `  ${i + 1}. [${t.id}] ${t.title}${t.due ? ' (due ' + t.due.slice(0, 10) + ')' : ''}`).join('\n')
+    : '  None';
+
+  const calList = showCalendar.length > 0
+    ? showCalendar.slice(0, 10).map(e => {
+        const start = e.start ? new Date(e.start).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : (e.date || '');
+        return `  - ${start}: ${e.title || e.event}${e.location ? ' @ ' + e.location : ''}`;
+      }).join('\n')
+    : '  None';
+
+  const emailList = external.emails.length > 0
+    ? external.emails.slice(0, 5).map(e => `  - From: ${e.from} | ${e.subject}`).join('\n')
+    : '  None';
+
+  const todayList = todayEvents.length > 0
+    ? todayEvents.map(e => {
+        const t = e.start ? new Date(e.start).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : (e.time || '');
+        return `  ${t ? t + ': ' : ''}${e.title || e.event}`;
+      }).join('\n')
+    : '  Nothing scheduled today';
 
   return `You are Circe, a warm and patient personal voice assistant for Kate, a special education teacher (grades 7-12) who has early onset Alzheimer's. You help Kate manage her daily life at school and home.
 
 Guidelines:
 - Speak in short, clear sentences — your responses will be read aloud
 - Be warm, encouraging, and never condescending
-- Always confirm actions out loud ("Done! I've added that to your list.")
-- If you're unsure about something complex or medical, say "That's a good question — let me get my advisor's take on that" (this will trigger a more careful response)
-- Today is ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+- Always confirm actions ("Done! I've added that!")
+- For complex or sensitive topics (medical, legal), say "That's worth a second opinion — let me ask my advisor about that"
+- Today is ${today}
+- ${connections}
 
-Kate's current data:
-PENDING TASKS (${tasks.length}):
-${tasks.length > 0 ? tasks.map(t => `  [ID:${t.id}] ${t.title}`).join('\n') : '  None'}
+UPCOMING CALENDAR (next 7 days):
+${calList}
 
-STUDENTS WITH NOTES: ${studentNames.length > 0 ? studentNames.join(', ') : 'None yet'}
+TODAY'S SCHEDULE:
+${todayList}
 
-TODAY'S SCHEDULE: ${todayEvents.length > 0 ? todayEvents.map(e => `${e.time ? e.time + ' - ' : ''}${e.event}`).join(', ') : 'Nothing scheduled today'}
+PENDING TASKS (${showTasks.length}):
+${taskList}
 
-UPCOMING (next 5): ${upcomingEvents.length > 0 ? upcomingEvents.map(e => `${e.date}: ${e.event}`).join(' | ') : 'Nothing upcoming'}`;
+RECENT UNREAD EMAILS:
+${emailList}`;
 }
 
+// ── Tools ─────────────────────────────────────────────────────────────────────
+
 const tools = [
+  // Local storage tools (always available as fallback)
   {
-    name: "manage_tasks",
-    description: "Add, complete, delete, or list Kate's tasks",
+    name: "local_task",
+    description: "Add, complete, delete, or list tasks in local storage (use when no external service is connected)",
     input_schema: {
       type: "object",
       properties: {
         action: { type: "string", enum: ["add", "complete", "delete", "list"] },
-        task: { type: "string", description: "Task description (for add)" },
-        task_id: { type: "number", description: "Task ID (for complete or delete)" }
+        task: { type: "string" },
+        task_id: { type: "number" },
       },
-      required: ["action"]
-    }
+      required: ["action"],
+    },
   },
   {
-    name: "manage_students",
-    description: "Add notes about students or retrieve existing notes",
-    input_schema: {
-      type: "object",
-      properties: {
-        action: { type: "string", enum: ["add_note", "get_notes", "list_students"] },
-        student_name: { type: "string", description: "Student's name" },
-        note: { type: "string", description: "The note to add" }
-      },
-      required: ["action"]
-    }
-  },
-  {
-    name: "manage_schedule",
-    description: "Add events to the schedule or view what's coming up",
+    name: "local_schedule",
+    description: "Add or view local schedule items (use when no calendar service is connected)",
     input_schema: {
       type: "object",
       properties: {
         action: { type: "string", enum: ["add", "list", "list_today"] },
-        event: { type: "string", description: "Event description" },
-        date: { type: "string", description: "Date as YYYY-MM-DD" },
-        time: { type: "string", description: "Time like '9:00 AM' (optional)" }
+        event: { type: "string" },
+        date: { type: "string", description: "YYYY-MM-DD" },
+        time: { type: "string" },
       },
-      required: ["action"]
-    }
-  }
+      required: ["action"],
+    },
+  },
+  {
+    name: "local_student_notes",
+    description: "Add or retrieve notes about Kate's students",
+    input_schema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["add_note", "get_notes", "list_students"] },
+        student_name: { type: "string" },
+        note: { type: "string" },
+      },
+      required: ["action"],
+    },
+  },
+  // External calendar tools
+  {
+    name: "create_calendar_event",
+    description: "Create an event in Google Calendar or Outlook (use when a calendar service is connected). Requires a specific start datetime.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        start: { type: "string", description: "ISO 8601 datetime, e.g. 2026-03-20T09:00:00" },
+        end: { type: "string", description: "ISO 8601 datetime (optional, defaults to 1 hour later)" },
+        location: { type: "string" },
+        description: { type: "string" },
+      },
+      required: ["title", "start"],
+    },
+  },
+  // External task tools
+  {
+    name: "create_external_task",
+    description: "Create a task in Google Tasks or Microsoft To Do (use when a task service is connected)",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        notes: { type: "string" },
+        due: { type: "string", description: "ISO 8601 date, e.g. 2026-03-20" },
+      },
+      required: ["title"],
+    },
+  },
+  {
+    name: "complete_external_task",
+    description: "Mark a task complete in Google Tasks or Microsoft To Do",
+    input_schema: {
+      type: "object",
+      properties: {
+        task_id: { type: "string", description: "The task ID from the task list" },
+        source: { type: "string", enum: ["google", "microsoft"], description: "Which service the task is from" },
+      },
+      required: ["task_id", "source"],
+    },
+  },
 ];
 
-function runTool(toolName, input, data) {
-  const tasks = [...(data.tasks || [])];
-  const students = { ...(data.students || {}) };
-  const schedule = [...(data.schedule || [])];
+// ── Tool execution ────────────────────────────────────────────────────────────
 
-  if (toolName === 'manage_tasks') {
+function runLocalTool(name, input, localData) {
+  const tasks = [...(localData.tasks || [])];
+  const students = { ...(localData.students || {}) };
+  const schedule = [...(localData.schedule || [])];
+
+  if (name === 'local_task') {
     if (input.action === 'add') {
-      const task = { id: Date.now(), title: input.task, done: false, created: new Date().toISOString() };
-      tasks.push(task);
-      return { result: `Added: "${input.task}"`, tasks };
+      const t = { id: Date.now(), title: input.task, done: false, created: new Date().toISOString() };
+      tasks.push(t);
+      return { result: `Added task: "${input.task}"`, tasks };
     }
     if (input.action === 'complete') {
       const t = tasks.find(t => t.id === input.task_id);
-      if (t) { t.done = true; return { result: `Marked done: "${t.title}"`, tasks }; }
+      if (t) { t.done = true; return { result: `Done: "${t.title}"`, tasks }; }
       return { result: 'Task not found', tasks };
     }
     if (input.action === 'delete') {
-      const idx = tasks.findIndex(t => t.id === input.task_id);
-      if (idx !== -1) { const title = tasks[idx].title; tasks.splice(idx, 1); return { result: `Deleted: "${title}"`, tasks }; }
+      const i = tasks.findIndex(t => t.id === input.task_id);
+      if (i !== -1) { const title = tasks[i].title; tasks.splice(i, 1); return { result: `Deleted: "${title}"`, tasks }; }
       return { result: 'Task not found', tasks };
     }
     if (input.action === 'list') {
       const pending = tasks.filter(t => !t.done);
-      return { result: pending.length > 0 ? pending.map(t => `${t.title}`).join('; ') : 'No pending tasks', tasks };
+      return { result: pending.length > 0 ? pending.map(t => t.title).join('; ') : 'No pending tasks', tasks };
     }
   }
 
-  if (toolName === 'manage_students') {
+  if (name === 'local_schedule') {
+    if (input.action === 'add') {
+      schedule.push({ id: Date.now(), event: input.event, date: input.date, time: input.time || '' });
+      return { result: `Scheduled: ${input.event} on ${input.date}`, schedule };
+    }
+    if (input.action === 'list_today') {
+      const today = new Date().toISOString().split('T')[0];
+      const events = schedule.filter(e => e.date === today);
+      return { result: events.length > 0 ? events.map(e => `${e.time ? e.time + ': ' : ''}${e.event}`).join('; ') : 'Nothing today', schedule };
+    }
+    if (input.action === 'list') {
+      return { result: schedule.length > 0 ? schedule.map(e => `${e.date}: ${e.event}`).join('; ') : 'Empty', schedule };
+    }
+  }
+
+  if (name === 'local_student_notes') {
     if (input.action === 'add_note') {
       if (!students[input.student_name]) students[input.student_name] = [];
       students[input.student_name].push({ note: input.note, date: new Date().toISOString() });
@@ -123,39 +310,74 @@ function runTool(toolName, input, data) {
     }
   }
 
-  if (toolName === 'manage_schedule') {
-    if (input.action === 'add') {
-      schedule.push({ id: Date.now(), event: input.event, date: input.date, time: input.time || '' });
-      return { result: `Scheduled: ${input.event} on ${input.date}`, schedule };
-    }
-    if (input.action === 'list_today') {
-      const today = new Date().toISOString().split('T')[0];
-      const events = schedule.filter(e => e.date === today);
-      return { result: events.length > 0 ? events.map(e => `${e.time ? e.time + ' ' : ''}${e.event}`).join('; ') : 'Nothing today', schedule };
-    }
-    if (input.action === 'list') {
-      return { result: schedule.length > 0 ? schedule.map(e => `${e.date}: ${e.event}`).join('; ') : 'Schedule is empty', schedule };
-    }
-  }
-
   return { result: 'Done' };
 }
 
+async function runExternalTool(name, input) {
+  if (name === 'create_calendar_event') {
+    if (google.isConnected()) {
+      await google.createCalendarEvent(input);
+      return `Added to Google Calendar: "${input.title}"`;
+    }
+    if (microsoft.isConnected()) {
+      await microsoft.createCalendarEvent(input);
+      return `Added to Outlook: "${input.title}"`;
+    }
+    return 'No calendar service connected. Use local schedule instead.';
+  }
+
+  if (name === 'create_external_task') {
+    if (google.isConnected()) {
+      await google.createTask(input);
+      return `Added to Google Tasks: "${input.title}"`;
+    }
+    if (microsoft.isConnected()) {
+      await microsoft.createTask(input);
+      return `Added to Microsoft To Do: "${input.title}"`;
+    }
+    return 'No task service connected. Use local tasks instead.';
+  }
+
+  if (name === 'complete_external_task') {
+    if (input.source === 'google' && google.isConnected()) {
+      await google.completeTask(input.task_id);
+      return 'Task marked complete in Google Tasks.';
+    }
+    if (input.source === 'microsoft' && microsoft.isConnected()) {
+      await microsoft.completeTask(input.task_id);
+      return 'Task marked complete in Microsoft To Do.';
+    }
+    return 'Could not complete task — service not connected.';
+  }
+
+  return 'Unknown tool';
+}
+
+// ── Chat endpoint ─────────────────────────────────────────────────────────────
+
 app.post('/api/chat', async (req, res) => {
-  const { messages, data = {}, useConsultant = false } = req.body;
+  const { messages, localData = {}, useConsultant = false } = req.body;
   const model = useConsultant ? 'claude-opus-4-6' : 'claude-sonnet-4-6';
 
   try {
+    // Fetch live data from connected services
+    const external = await fetchExternalData();
+    const systemPrompt = buildSystemPrompt(localData, external);
+
     let currentMessages = [...messages];
-    let updatedData = { tasks: data.tasks || [], students: data.students || {}, schedule: data.schedule || [] };
+    let updatedLocalData = {
+      tasks: localData.tasks || [],
+      students: localData.students || {},
+      schedule: localData.schedule || [],
+    };
 
     while (true) {
       const response = await anthropic.messages.create({
         model,
         max_tokens: 512,
-        system: buildSystemPrompt(updatedData),
+        system: systemPrompt,
         tools,
-        messages: currentMessages
+        messages: currentMessages,
       });
 
       if (response.stop_reason === 'tool_use') {
@@ -164,28 +386,43 @@ app.post('/api/chat', async (req, res) => {
 
         const results = [];
         for (const tb of toolBlocks) {
-          const outcome = runTool(tb.name, tb.input, updatedData);
-          if (outcome.tasks) updatedData.tasks = outcome.tasks;
-          if (outcome.students) updatedData.students = outcome.students;
-          if (outcome.schedule) updatedData.schedule = outcome.schedule;
-          results.push({ type: 'tool_result', tool_use_id: tb.id, content: outcome.result });
+          let resultText;
+          if (['local_task', 'local_schedule', 'local_student_notes'].includes(tb.name)) {
+            const outcome = runLocalTool(tb.name, tb.input, updatedLocalData);
+            if (outcome.tasks) updatedLocalData.tasks = outcome.tasks;
+            if (outcome.students) updatedLocalData.students = outcome.students;
+            if (outcome.schedule) updatedLocalData.schedule = outcome.schedule;
+            resultText = outcome.result;
+          } else {
+            resultText = await runExternalTool(tb.name, tb.input);
+          }
+          results.push({ type: 'tool_result', tool_use_id: tb.id, content: resultText });
         }
         currentMessages.push({ role: 'user', content: results });
         continue;
       }
 
       const text = response.content.find(b => b.type === 'text')?.text || "I'm not sure what to say.";
-      const needsConsultant = !useConsultant && (text.includes("advisor's take") || text.includes("ask my advisor"));
+      const needsConsultant = !useConsultant && text.includes("advisor");
 
-      return res.json({ response: text, data: updatedData, needsConsultant, model });
+      return res.json({
+        response: text,
+        localData: updatedLocalData,
+        needsConsultant,
+        model,
+      });
     }
-  } catch (err) {
+  } catch(err) {
     console.error('Chat error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
+// ── Start ─────────────────────────────────────────────────────────────────────
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`\n✨ Circe is running at http://localhost:${PORT}\n`);
+  if (google.isConnected()) console.log('  ✓ Google connected');
+  if (microsoft.isConnected()) console.log('  ✓ Microsoft connected');
 });

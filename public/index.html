@@ -296,6 +296,20 @@
 
     .input-row button:hover { background: #6d28d9; }
 
+    .account-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 5px 0;
+      font-size: 0.85rem;
+    }
+    .account-row .connected { color: #4ade80; }
+    .account-row .disconnected { color: #6b6b8a; }
+    .account-row .unconfigured { color: #3a3a5a; }
+    .account-row a { color: #7c3aed; text-decoration: none; font-size: 0.78rem; }
+    .account-row a:hover { text-decoration: underline; }
+    .account-row .hint { color: #3a3a5a; font-size: 0.75rem; }
+
     @media (max-width: 640px) {
       .sidebar { display: none; }
     }
@@ -340,6 +354,14 @@
     <div id="task-list">
       <div class="no-tasks">No tasks yet</div>
     </div>
+
+    <div class="sidebar-section">
+      <h3>🔗 Connected Accounts</h3>
+      <div id="accounts-status">
+        <div class="account-row"><span class="unconfigured">Loading…</span></div>
+      </div>
+    </div>
+
   </div>
 
 </div>

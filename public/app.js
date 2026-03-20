@@ -16,6 +16,7 @@ class CirceApp {
     this.taskListEl = document.getElementById('task-list');
 
     this.updateTaskDisplay();
+    this.loadConnectionStatus();
 
     if (!SpeechRecognition) {
       document.getElementById('error-banner').style.display = 'block';
@@ -172,7 +173,7 @@ class CirceApp {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: this.conversation,
-          data: this.data,
+          localData: this.data,
           useConsultant: this.useConsultant
         })
       });
@@ -180,7 +181,7 @@ class CirceApp {
       if (!res.ok) throw new Error(`Server error ${res.status}`);
       const json = await res.json();
 
-      if (json.data) this.saveData(json.data);
+      if (json.localData) this.saveData(json.localData);
       this.conversation.push({ role: 'assistant', content: json.response });
 
       // Keep conversation from growing too large
@@ -315,6 +316,32 @@ class CirceApp {
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
       osc.start(ctx.currentTime);
       osc.stop(ctx.currentTime + 0.4);
+    } catch(e) {}
+  }
+
+  async loadConnectionStatus() {
+    try {
+      const res = await fetch('/api/connections');
+      const { google, microsoft } = await res.json();
+      const el = document.getElementById('accounts-status');
+      if (!el) return;
+      el.innerHTML = `
+        <div class="account-row">
+          <span class="${google.connected ? 'connected' : google.configured ? 'disconnected' : 'unconfigured'}">
+            ${google.connected ? '✓' : '✗'} Google
+          </span>
+          ${google.configured
+            ? `<a href="${google.connected ? '/auth/google/disconnect' : '/auth/google'}">${google.connected ? 'Disconnect' : 'Connect'}</a>`
+            : '<span class="hint">Add to .env</span>'}
+        </div>
+        <div class="account-row">
+          <span class="${microsoft.connected ? 'connected' : microsoft.configured ? 'disconnected' : 'unconfigured'}">
+            ${microsoft.connected ? '✓' : '✗'} Microsoft
+          </span>
+          ${microsoft.configured
+            ? `<a href="${microsoft.connected ? '/auth/microsoft/disconnect' : '/auth/microsoft'}">${microsoft.connected ? 'Disconnect' : 'Connect'}</a>`
+            : '<span class="hint">Add to .env</span>'}
+        </div>`;
     } catch(e) {}
   }
 
