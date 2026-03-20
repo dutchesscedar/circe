@@ -94,6 +94,7 @@ class CirceApp {
           'https://www.googleapis.com/auth/calendar',
           'https://www.googleapis.com/auth/tasks',
           'https://www.googleapis.com/auth/gmail.readonly',
+          'https://www.googleapis.com/auth/gmail.send',
         ].join(' '),
         callback: (response) => {
           if (response.error) {

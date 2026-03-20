@@ -9,6 +9,7 @@ const SCOPES = [
   'https://www.googleapis.com/auth/calendar',
   'https://www.googleapis.com/auth/tasks',
   'https://www.googleapis.com/auth/gmail.readonly',
+  'https://www.googleapis.com/auth/gmail.send',
 ].join(' ');
 
 function getClientId() {
@@ -105,6 +106,22 @@ async function completeTask(accessToken, taskId) {
   await tasks.tasks.patch({ tasklist: listId, task: taskId, requestBody: { status: 'completed' } });
 }
 
+async function sendEmail(accessToken, { to, subject, body }) {
+  const auth = makeAuthClient(accessToken);
+  const gmail = google.gmail({ version: 'v1', auth });
+  // Build a minimal RFC 2822 message
+  const message = [
+    `To: ${to}`,
+    `Subject: ${subject}`,
+    'Content-Type: text/plain; charset=utf-8',
+    '',
+    body,
+  ].join('\r\n');
+  // Gmail requires base64url encoding (no padding, url-safe)
+  const encoded = Buffer.from(message).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  await gmail.users.messages.send({ userId: 'me', requestBody: { raw: encoded } });
+}
+
 // Returns normalized emails: { id, subject, from, date, source }
 async function getRecentEmails(accessToken, max = 5) {
   const auth = makeAuthClient(accessToken);
@@ -140,4 +157,5 @@ module.exports = {
   createTask,
   completeTask,
   getRecentEmails,
+  sendEmail,
 };

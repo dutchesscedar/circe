@@ -226,6 +226,19 @@ const tools = [
       required: ["event_id"],
     },
   },
+  {
+    name: "send_email",
+    description: "Compose and send an email via Gmail. Use when Duchess asks to send, write, or reply to an email.",
+    input_schema: {
+      type: "object",
+      properties: {
+        to: { type: "string", description: "Recipient email address" },
+        subject: { type: "string", description: "Email subject line" },
+        body: { type: "string", description: "Email body text" },
+      },
+      required: ["to", "subject", "body"],
+    },
+  },
 ];
 
 // ── Tool execution ────────────────────────────────────────────────────────────
@@ -323,6 +336,14 @@ async function runExternalTool(name, input, googleToken) {
         return `Deleted from Google Calendar: "${input.title || input.event_id}"`;
       }
       return 'No calendar connected.';
+    }
+
+    if (name === 'send_email') {
+      if (googleToken && google.isConfigured()) {
+        await google.sendEmail(googleToken, input);
+        return `Email sent to ${input.to}: "${input.subject}"`;
+      }
+      return 'Google is not connected. Cannot send email.';
     }
 
     return 'Unknown tool';
