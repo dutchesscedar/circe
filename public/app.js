@@ -10,13 +10,17 @@ class CirceApp {
     this.data = this.loadData();
     this.useConsultant = false;
 
+    // Google token (short-lived, from GIS; refreshed when expired)
+    this.googleToken = sessionStorage.getItem('google_token') || null;
+    this.tokenClient = null;
+
     this.statusEl = document.getElementById('status-text');
     this.interimEl = document.getElementById('interim-text');
     this.convEl = document.getElementById('conversation');
     this.taskListEl = document.getElementById('task-list');
 
     this.updateTaskDisplay();
-    this.loadConnectionStatus();
+    this.initGoogle();   // sets up GIS, then loads connection status
 
     if (!SpeechRecognition) {
       document.getElementById('error-banner').style.display = 'block';
@@ -67,6 +71,77 @@ class CirceApp {
         <span>${this.escapeHtml(t.title)}</span>
       </div>`
     ).join('');
+  }
+
+  // ── Google Identity Services ─────────────────────────────────────────────
+
+  async initGoogle() {
+    try {
+      const res = await fetch('/api/google-client-id');
+      const { clientId } = await res.json();
+
+      if (!clientId) {
+        this.loadConnectionStatus(false);
+        return;
+      }
+
+      // Wait for the GIS library to load (it loads async)
+      await this.waitForGIS();
+
+      this.tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: clientId,
+        scope: [
+          'https://www.googleapis.com/auth/calendar',
+          'https://www.googleapis.com/auth/tasks',
+          'https://www.googleapis.com/auth/gmail.readonly',
+        ].join(' '),
+        callback: (response) => {
+          if (response.error) {
+            console.error('Google sign-in error:', response.error);
+            return;
+          }
+          this.googleToken = response.access_token;
+          sessionStorage.setItem('google_token', response.access_token);
+          this.loadConnectionStatus(true);
+        },
+      });
+
+      this.loadConnectionStatus(!!this.googleToken);
+    } catch (e) {
+      console.error('Google init error:', e);
+      this.loadConnectionStatus(false);
+    }
+  }
+
+  waitForGIS() {
+    return new Promise((resolve) => {
+      if (window.google?.accounts?.oauth2) { resolve(); return; }
+      const interval = setInterval(() => {
+        if (window.google?.accounts?.oauth2) {
+          clearInterval(interval);
+          resolve();
+        }
+      }, 100);
+      // Give up after 5s (works offline / no client ID)
+      setTimeout(() => { clearInterval(interval); resolve(); }, 5000);
+    });
+  }
+
+  connectGoogle() {
+    if (!this.tokenClient) {
+      alert('Google Client ID not configured. Click the setup guide link above.');
+      return;
+    }
+    this.tokenClient.requestAccessToken();
+  }
+
+  disconnectGoogle() {
+    if (this.googleToken) {
+      google.accounts.oauth2.revoke(this.googleToken, () => {});
+    }
+    this.googleToken = null;
+    sessionStorage.removeItem('google_token');
+    this.loadConnectionStatus(false);
   }
 
   // ── Speech recognition ──────────────────────────────────────────────────────
@@ -174,6 +249,7 @@ class CirceApp {
         body: JSON.stringify({
           messages: this.conversation,
           localData: this.data,
+          googleToken: this.googleToken,
           useConsultant: this.useConsultant
         })
       });
@@ -213,16 +289,20 @@ class CirceApp {
   async reprocessLastWithConsultant() {
     // Remove the last assistant message and re-call with Opus
     this.conversation = this.conversation.slice(0, -1);
-    const lastUser = this.conversation[this.conversation.length - 1].content;
 
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: this.conversation, data: this.data, useConsultant: true })
+        body: JSON.stringify({
+          messages: this.conversation,
+          localData: this.data,
+          googleToken: this.googleToken,
+          useConsultant: true
+        })
       });
       const json = await res.json();
-      if (json.data) this.saveData(json.data);
+      if (json.localData) this.saveData(json.localData);
       this.conversation.push({ role: 'assistant', content: json.response });
       this.useConsultant = false;
 
@@ -327,7 +407,6 @@ class CirceApp {
       const res = await fetch('/api/settings');
       const s = await res.json();
       document.getElementById('s-google-id').value = s.GOOGLE_CLIENT_ID || '';
-      document.getElementById('s-google-secret').value = s.GOOGLE_CLIENT_SECRET || '';
       document.getElementById('s-ms-id').value = s.MICROSOFT_CLIENT_ID || '';
       document.getElementById('s-ms-secret').value = s.MICROSOFT_CLIENT_SECRET || '';
     } catch(e) {}
@@ -340,39 +419,64 @@ class CirceApp {
   async saveSettings() {
     const body = {
       GOOGLE_CLIENT_ID:        document.getElementById('s-google-id').value,
-      GOOGLE_CLIENT_SECRET:    document.getElementById('s-google-secret').value,
       MICROSOFT_CLIENT_ID:     document.getElementById('s-ms-id').value,
       MICROSOFT_CLIENT_SECRET: document.getElementById('s-ms-secret').value,
     };
     await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     document.getElementById('settings-msg').style.display = 'block';
-    this.loadConnectionStatus();
+    // Re-init Google with the new client ID
+    await this.initGoogle();
   }
 
-  async loadConnectionStatus() {
-    try {
-      const res = await fetch('/api/connections');
-      const { google, microsoft } = await res.json();
-      const el = document.getElementById('accounts-status');
-      if (!el) return;
-      el.innerHTML = `
-        <div class="account-row">
-          <span class="${google.connected ? 'connected' : google.configured ? 'disconnected' : 'unconfigured'}">
-            ${google.connected ? '✓' : '✗'} Google
-          </span>
-          ${google.configured
-            ? `<a href="${google.connected ? '/auth/google/disconnect' : '/auth/google'}">${google.connected ? 'Disconnect' : 'Connect'}</a>`
-            : '<span class="hint">Add to .env</span>'}
-        </div>
-        <div class="account-row">
-          <span class="${microsoft.connected ? 'connected' : microsoft.configured ? 'disconnected' : 'unconfigured'}">
-            ${microsoft.connected ? '✓' : '✗'} Microsoft
-          </span>
-          ${microsoft.configured
-            ? `<a href="${microsoft.connected ? '/auth/microsoft/disconnect' : '/auth/microsoft'}">${microsoft.connected ? 'Disconnect' : 'Connect'}</a>`
-            : '<span class="hint">Add to .env</span>'}
+  loadConnectionStatus(googleConnected) {
+    const el = document.getElementById('accounts-status');
+    if (!el) return;
+
+    // Check if Google client ID is configured
+    fetch('/api/connections').then(r => r.json()).then(({ google, microsoft }) => {
+      const gConnected = googleConnected !== undefined ? googleConnected : !!this.googleToken;
+      const gConfigured = google.configured;
+
+      let googleHtml;
+      if (!gConfigured) {
+        googleHtml = `<div class="account-row">
+          <span class="unconfigured">✗ Google</span>
+          <a href="/setup-google.html">Set up</a>
         </div>`;
-    } catch(e) {}
+      } else if (gConnected) {
+        googleHtml = `<div class="account-row">
+          <span class="connected">✓ Google</span>
+          <a href="#" onclick="app.disconnectGoogle(); return false;">Disconnect</a>
+        </div>`;
+      } else {
+        googleHtml = `<div class="account-row">
+          <span class="disconnected">○ Google</span>
+          <a href="#" onclick="app.connectGoogle(); return false;">Connect</a>
+        </div>`;
+      }
+
+      const msConnected = microsoft.connected;
+      const msConfigured = microsoft.configured;
+      let msHtml;
+      if (!msConfigured) {
+        msHtml = `<div class="account-row">
+          <span class="unconfigured">✗ Microsoft</span>
+          <span class="hint">Add to Settings</span>
+        </div>`;
+      } else if (msConnected) {
+        msHtml = `<div class="account-row">
+          <span class="connected">✓ Microsoft</span>
+          <a href="/auth/microsoft/disconnect">Disconnect</a>
+        </div>`;
+      } else {
+        msHtml = `<div class="account-row">
+          <span class="disconnected">○ Microsoft</span>
+          <a href="/auth/microsoft">Connect</a>
+        </div>`;
+      }
+
+      el.innerHTML = googleHtml + msHtml;
+    }).catch(() => {});
   }
 
   greet() {

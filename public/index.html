@@ -378,11 +378,9 @@
 
     <div class="settings-section">
       <h3>Google <span style="font-weight:300; color:#6b6b8a;">(Calendar, Tasks, Gmail)</span></h3>
-      <p class="settings-hint">Get these at <a href="https://console.cloud.google.com" target="_blank">console.cloud.google.com</a> → APIs &amp; Services → Credentials → Create OAuth 2.0 Client ID.<br>Set redirect URI to: <code>http://localhost:3000/auth/google/callback</code></p>
+      <p class="settings-hint">Only a Client ID is needed — no secret required! <a href="/setup-google.html" target="_blank">Step-by-step setup guide ↗</a></p>
       <label>Client ID</label>
-      <input id="s-google-id" type="text" placeholder="paste your Google Client ID">
-      <label>Client Secret</label>
-      <input id="s-google-secret" type="password" placeholder="paste your Google Client Secret">
+      <input id="s-google-id" type="text" placeholder="ends in .apps.googleusercontent.com">
     </div>
 
     <div class="settings-section">
@@ -423,6 +421,7 @@
   .cancel-btn:hover { color: #e0e0f0; }
 </style>
 
+<script src="https://accounts.google.com/gsi/client" async></script>
 <script src="app.js"></script>
 </body>
 </html>

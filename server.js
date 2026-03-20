@@ -11,30 +11,10 @@ app.use(express.static('public'));
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-// ── OAuth routes ──────────────────────────────────────────────────────────────
-
-app.get('/auth/google', (req, res) => {
-  if (!google.isConfigured()) return res.send('Google credentials not configured in .env');
-  res.redirect(google.getAuthUrl());
-});
-
-app.get('/auth/google/callback', async (req, res) => {
-  try {
-    await google.handleCallback(req.query.code);
-    res.redirect('/?connected=google');
-  } catch(e) {
-    console.error('Google auth error:', e.message);
-    res.redirect('/?error=google');
-  }
-});
-
-app.get('/auth/google/disconnect', (req, res) => {
-  google.disconnect();
-  res.redirect('/');
-});
+// ── Microsoft OAuth routes (server-side, needs secret) ────────────────────────
 
 app.get('/auth/microsoft', async (req, res) => {
-  if (!microsoft.isConfigured()) return res.send('Microsoft credentials not configured in .env');
+  if (!microsoft.isConfigured()) return res.send('Microsoft credentials not configured.');
   const url = await microsoft.getAuthUrl();
   res.redirect(url);
 });
@@ -54,23 +34,21 @@ app.get('/auth/microsoft/disconnect', (req, res) => {
   res.redirect('/');
 });
 
-// Settings — save credentials via browser UI (stored in config.json, gitignored)
+// ── Settings API (stored in config.json, gitignored) ─────────────────────────
+
 app.get('/api/settings', (req, res) => {
-  const mask = (v) => v ? v.slice(0, 6) + '••••••••' : '';
   res.json({
-    GOOGLE_CLIENT_ID:       config.get('GOOGLE_CLIENT_ID'),
-    GOOGLE_CLIENT_SECRET:   mask(config.get('GOOGLE_CLIENT_SECRET')),
-    MICROSOFT_CLIENT_ID:    config.get('MICROSOFT_CLIENT_ID'),
-    MICROSOFT_CLIENT_SECRET: mask(config.get('MICROSOFT_CLIENT_SECRET')),
+    GOOGLE_CLIENT_ID:        config.get('GOOGLE_CLIENT_ID'),
+    MICROSOFT_CLIENT_ID:     config.get('MICROSOFT_CLIENT_ID'),
+    MICROSOFT_CLIENT_SECRET: config.get('MICROSOFT_CLIENT_SECRET') ? '••••••••' : '',
   });
 });
 
 app.post('/api/settings', (req, res) => {
-  const allowed = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'MICROSOFT_CLIENT_ID', 'MICROSOFT_CLIENT_SECRET'];
+  const allowed = ['GOOGLE_CLIENT_ID', 'MICROSOFT_CLIENT_ID', 'MICROSOFT_CLIENT_SECRET'];
   const update = {};
   for (const key of allowed) {
-    // Don't overwrite with a masked value
-    if (req.body[key] && !req.body[key].includes('••••')) {
+    if (req.body[key] !== undefined && req.body[key] !== '' && !req.body[key].includes('••••')) {
       update[key] = req.body[key].trim();
     }
   }
@@ -78,24 +56,29 @@ app.post('/api/settings', (req, res) => {
   res.json({ ok: true });
 });
 
+// Returns the Google Client ID so the browser can initialize GIS
+app.get('/api/google-client-id', (req, res) => {
+  res.json({ clientId: google.getClientId() || null });
+});
+
 app.get('/api/connections', (req, res) => {
   res.json({
-    google: { configured: google.isConfigured(), connected: google.isConnected() },
+    google: { configured: google.isConfigured() },
     microsoft: { configured: microsoft.isConfigured(), connected: microsoft.isConnected() },
   });
 });
 
 // ── Fetch live data from connected services ───────────────────────────────────
 
-async function fetchExternalData() {
+async function fetchExternalData(googleToken) {
   const result = { calendar: [], tasks: [], emails: [], sources: [] };
 
-  if (google.isConnected()) {
+  if (googleToken && google.isConfigured()) {
     try {
       const [cal, tasks, emails] = await Promise.all([
-        google.getCalendarEvents(7),
-        google.getTasks(),
-        google.getRecentEmails(5),
+        google.getCalendarEvents(googleToken, 7),
+        google.getTasks(googleToken),
+        google.getRecentEmails(googleToken, 5),
       ]);
       result.calendar.push(...cal);
       result.tasks.push(...tasks);
@@ -118,9 +101,7 @@ async function fetchExternalData() {
     } catch(e) { console.error('Microsoft fetch error:', e.message); }
   }
 
-  // Sort calendar by start time
   result.calendar.sort((a, b) => new Date(a.start) - new Date(b.start));
-
   return result;
 }
 
@@ -130,13 +111,9 @@ function buildSystemPrompt(localData, external) {
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   const todayStr = new Date().toISOString().split('T')[0];
 
-  // Merge tasks: external takes priority if connected
   const showTasks = external.tasks.length > 0 ? external.tasks : (localData.tasks || []).filter(t => !t.done);
   const showCalendar = external.calendar.length > 0 ? external.calendar : (localData.schedule || []);
-  const todayEvents = showCalendar.filter(e => {
-    const d = (e.start || e.date || '').slice(0, 10);
-    return d === todayStr;
-  });
+  const todayEvents = showCalendar.filter(e => (e.start || e.date || '').slice(0, 10) === todayStr);
 
   const connections = external.sources.length > 0
     ? `Connected: ${external.sources.join(', ')}`
@@ -148,7 +125,9 @@ function buildSystemPrompt(localData, external) {
 
   const calList = showCalendar.length > 0
     ? showCalendar.slice(0, 10).map(e => {
-        const start = e.start ? new Date(e.start).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : (e.date || '');
+        const start = e.start
+          ? new Date(e.start).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+          : (e.date || '');
         return `  - ${start}: ${e.title || e.event}${e.location ? ' @ ' + e.location : ''}`;
       }).join('\n')
     : '  None';
@@ -190,10 +169,9 @@ ${emailList}`;
 // ── Tools ─────────────────────────────────────────────────────────────────────
 
 const tools = [
-  // Local storage tools (always available as fallback)
   {
     name: "local_task",
-    description: "Add, complete, delete, or list tasks in local storage (use when no external service is connected)",
+    description: "Add, complete, delete, or list tasks in local storage (fallback when no external service connected)",
     input_schema: {
       type: "object",
       properties: {
@@ -206,7 +184,7 @@ const tools = [
   },
   {
     name: "local_schedule",
-    description: "Add or view local schedule items (use when no calendar service is connected)",
+    description: "Add or view local schedule items (fallback when no calendar connected)",
     input_schema: {
       type: "object",
       properties: {
@@ -231,23 +209,21 @@ const tools = [
       required: ["action"],
     },
   },
-  // External calendar tools
   {
     name: "create_calendar_event",
-    description: "Create an event in Google Calendar or Outlook (use when a calendar service is connected). Requires a specific start datetime.",
+    description: "Create an event in Google Calendar or Outlook (use when a calendar service is connected)",
     input_schema: {
       type: "object",
       properties: {
         title: { type: "string" },
-        start: { type: "string", description: "ISO 8601 datetime, e.g. 2026-03-20T09:00:00" },
-        end: { type: "string", description: "ISO 8601 datetime (optional, defaults to 1 hour later)" },
+        start: { type: "string", description: "ISO 8601 datetime e.g. 2026-03-20T09:00:00" },
+        end: { type: "string", description: "ISO 8601 datetime (optional)" },
         location: { type: "string" },
         description: { type: "string" },
       },
       required: ["title", "start"],
     },
   },
-  // External task tools
   {
     name: "create_external_task",
     description: "Create a task in Google Tasks or Microsoft To Do (use when a task service is connected)",
@@ -256,7 +232,7 @@ const tools = [
       properties: {
         title: { type: "string" },
         notes: { type: "string" },
-        due: { type: "string", description: "ISO 8601 date, e.g. 2026-03-20" },
+        due: { type: "string", description: "ISO date e.g. 2026-03-20" },
       },
       required: ["title"],
     },
@@ -267,8 +243,8 @@ const tools = [
     input_schema: {
       type: "object",
       properties: {
-        task_id: { type: "string", description: "The task ID from the task list" },
-        source: { type: "string", enum: ["google", "microsoft"], description: "Which service the task is from" },
+        task_id: { type: "string" },
+        source: { type: "string", enum: ["google", "microsoft"] },
       },
       required: ["task_id", "source"],
     },
@@ -286,7 +262,7 @@ function runLocalTool(name, input, localData) {
     if (input.action === 'add') {
       const t = { id: Date.now(), title: input.task, done: false, created: new Date().toISOString() };
       tasks.push(t);
-      return { result: `Added task: "${input.task}"`, tasks };
+      return { result: `Added: "${input.task}"`, tasks };
     }
     if (input.action === 'complete') {
       const t = tasks.find(t => t.id === input.task_id);
@@ -338,41 +314,41 @@ function runLocalTool(name, input, localData) {
   return { result: 'Done' };
 }
 
-async function runExternalTool(name, input) {
+async function runExternalTool(name, input, googleToken) {
   if (name === 'create_calendar_event') {
-    if (google.isConnected()) {
-      await google.createCalendarEvent(input);
+    if (googleToken && google.isConfigured()) {
+      await google.createCalendarEvent(googleToken, input);
       return `Added to Google Calendar: "${input.title}"`;
     }
     if (microsoft.isConnected()) {
       await microsoft.createCalendarEvent(input);
       return `Added to Outlook: "${input.title}"`;
     }
-    return 'No calendar service connected. Use local schedule instead.';
+    return 'No calendar connected. Used local schedule instead.';
   }
 
   if (name === 'create_external_task') {
-    if (google.isConnected()) {
-      await google.createTask(input);
+    if (googleToken && google.isConfigured()) {
+      await google.createTask(googleToken, input);
       return `Added to Google Tasks: "${input.title}"`;
     }
     if (microsoft.isConnected()) {
       await microsoft.createTask(input);
       return `Added to Microsoft To Do: "${input.title}"`;
     }
-    return 'No task service connected. Use local tasks instead.';
+    return 'No task service connected.';
   }
 
   if (name === 'complete_external_task') {
-    if (input.source === 'google' && google.isConnected()) {
-      await google.completeTask(input.task_id);
+    if (input.source === 'google' && googleToken) {
+      await google.completeTask(googleToken, input.task_id);
       return 'Task marked complete in Google Tasks.';
     }
     if (input.source === 'microsoft' && microsoft.isConnected()) {
       await microsoft.completeTask(input.task_id);
       return 'Task marked complete in Microsoft To Do.';
     }
-    return 'Could not complete task — service not connected.';
+    return 'Could not complete task.';
   }
 
   return 'Unknown tool';
@@ -381,12 +357,11 @@ async function runExternalTool(name, input) {
 // ── Chat endpoint ─────────────────────────────────────────────────────────────
 
 app.post('/api/chat', async (req, res) => {
-  const { messages, localData = {}, useConsultant = false } = req.body;
+  const { messages, localData = {}, googleToken, useConsultant = false } = req.body;
   const model = useConsultant ? 'claude-opus-4-6' : 'claude-sonnet-4-6';
 
   try {
-    // Fetch live data from connected services
-    const external = await fetchExternalData();
+    const external = await fetchExternalData(googleToken);
     const systemPrompt = buildSystemPrompt(localData, external);
 
     let currentMessages = [...messages];
@@ -419,7 +394,7 @@ app.post('/api/chat', async (req, res) => {
             if (outcome.schedule) updatedLocalData.schedule = outcome.schedule;
             resultText = outcome.result;
           } else {
-            resultText = await runExternalTool(tb.name, tb.input);
+            resultText = await runExternalTool(tb.name, tb.input, googleToken);
           }
           results.push({ type: 'tool_result', tool_use_id: tb.id, content: resultText });
         }
@@ -428,14 +403,9 @@ app.post('/api/chat', async (req, res) => {
       }
 
       const text = response.content.find(b => b.type === 'text')?.text || "I'm not sure what to say.";
-      const needsConsultant = !useConsultant && text.includes("advisor");
+      const needsConsultant = !useConsultant && text.includes('advisor');
 
-      return res.json({
-        response: text,
-        localData: updatedLocalData,
-        needsConsultant,
-        model,
-      });
+      return res.json({ response: text, localData: updatedLocalData, needsConsultant, model });
     }
   } catch(err) {
     console.error('Chat error:', err.message);
@@ -448,6 +418,6 @@ app.post('/api/chat', async (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`\n✨ Circe is running at http://localhost:${PORT}\n`);
-  if (google.isConnected()) console.log('  ✓ Google connected');
+  if (google.isConfigured()) console.log('  ✓ Google Client ID configured');
   if (microsoft.isConnected()) console.log('  ✓ Microsoft connected');
 });

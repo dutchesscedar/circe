@@ -1,76 +1,34 @@
+// Google integration — uses browser-based OAuth (GIS).
+// The access token comes from the browser (via Google Identity Services)
+// and is passed with each /api/chat request. No client secret needed.
+
 const { google } = require('googleapis');
-const fs = require('fs');
-const path = require('path');
 const config = require('../config');
 
-const TOKENS_FILE = path.join(__dirname, '../tokens.json');
-const REDIRECT_URI = 'http://localhost:3000/auth/google/callback';
 const SCOPES = [
   'https://www.googleapis.com/auth/calendar',
-  'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/tasks',
-];
+  'https://www.googleapis.com/auth/gmail.readonly',
+].join(' ');
 
-function loadTokens() {
-  try { return JSON.parse(fs.readFileSync(TOKENS_FILE, 'utf8')); } catch(e) { return {}; }
-}
-
-function saveTokens(data) {
-  fs.writeFileSync(TOKENS_FILE, JSON.stringify(data, null, 2));
-}
-
-function makeClient() {
-  return new google.auth.OAuth2(
-    config.get('GOOGLE_CLIENT_ID'),
-    config.get('GOOGLE_CLIENT_SECRET'),
-    REDIRECT_URI
-  );
+function getClientId() {
+  return config.get('GOOGLE_CLIENT_ID');
 }
 
 function isConfigured() {
-  return !!(config.get('GOOGLE_CLIENT_ID') && config.get('GOOGLE_CLIENT_SECRET'));
+  return !!getClientId();
 }
 
-function isConnected() {
-  return isConfigured() && !!loadTokens().google;
-}
-
-function getAuthUrl() {
-  const client = makeClient();
-  return client.generateAuthUrl({ access_type: 'offline', prompt: 'consent', scope: SCOPES });
-}
-
-async function handleCallback(code) {
-  const client = makeClient();
-  const { tokens } = await client.getToken(code);
-  const stored = loadTokens();
-  stored.google = tokens;
-  saveTokens(stored);
-}
-
-function getClient() {
-  const tokens = loadTokens();
-  if (!tokens.google) return null;
-  const client = makeClient();
-  client.setCredentials(tokens.google);
-  client.on('tokens', (newTokens) => {
-    const stored = loadTokens();
-    stored.google = { ...stored.google, ...newTokens };
-    saveTokens(stored);
-  });
-  return client;
-}
-
-function disconnect() {
-  const stored = loadTokens();
-  delete stored.google;
-  saveTokens(stored);
+// Make an authenticated Google API client from a browser-issued access token
+function makeAuthClient(accessToken) {
+  const auth = new google.auth.OAuth2();
+  auth.setCredentials({ access_token: accessToken });
+  return auth;
 }
 
 // Returns normalized events: { id, title, start, end, location, source }
-async function getCalendarEvents(days = 7) {
-  const auth = getClient();
-  if (!auth) return [];
+async function getCalendarEvents(accessToken, days = 7) {
+  const auth = makeAuthClient(accessToken);
   const cal = google.calendar({ version: 'v3', auth });
   const now = new Date();
   const end = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
@@ -92,9 +50,8 @@ async function getCalendarEvents(days = 7) {
   }));
 }
 
-async function createCalendarEvent({ title, start, end, location, description }) {
-  const auth = getClient();
-  if (!auth) throw new Error('Google not connected');
+async function createCalendarEvent(accessToken, { title, start, end, location, description }) {
+  const auth = makeAuthClient(accessToken);
   const cal = google.calendar({ version: 'v3', auth });
   const res = await cal.events.insert({
     calendarId: 'primary',
@@ -110,9 +67,8 @@ async function createCalendarEvent({ title, start, end, location, description })
 }
 
 // Returns normalized tasks: { id, title, notes, due, source }
-async function getTasks() {
-  const auth = getClient();
-  if (!auth) return [];
+async function getTasks(accessToken) {
+  const auth = makeAuthClient(accessToken);
   const tasks = google.tasks({ version: 'v1', auth });
   const listsRes = await tasks.tasklists.list({ maxResults: 1 });
   const listId = listsRes.data.items?.[0]?.id || '@default';
@@ -126,18 +82,16 @@ async function getTasks() {
   }));
 }
 
-async function createTask({ title, notes, due }) {
-  const auth = getClient();
-  if (!auth) throw new Error('Google not connected');
+async function createTask(accessToken, { title, notes, due }) {
+  const auth = makeAuthClient(accessToken);
   const tasks = google.tasks({ version: 'v1', auth });
   const listsRes = await tasks.tasklists.list({ maxResults: 1 });
   const listId = listsRes.data.items?.[0]?.id || '@default';
   await tasks.tasks.insert({ tasklist: listId, requestBody: { title, notes, due } });
 }
 
-async function completeTask(taskId) {
-  const auth = getClient();
-  if (!auth) throw new Error('Google not connected');
+async function completeTask(accessToken, taskId) {
+  const auth = makeAuthClient(accessToken);
   const tasks = google.tasks({ version: 'v1', auth });
   const listsRes = await tasks.tasklists.list({ maxResults: 1 });
   const listId = listsRes.data.items?.[0]?.id || '@default';
@@ -145,9 +99,8 @@ async function completeTask(taskId) {
 }
 
 // Returns normalized emails: { id, subject, from, date, source }
-async function getRecentEmails(max = 5) {
-  const auth = getClient();
-  if (!auth) return [];
+async function getRecentEmails(accessToken, max = 5) {
+  const auth = makeAuthClient(accessToken);
   const gmail = google.gmail({ version: 'v1', auth });
   const listRes = await gmail.users.messages.list({ userId: 'me', maxResults: max, q: 'is:unread' });
   const messages = listRes.data.messages || [];
@@ -170,8 +123,13 @@ async function getRecentEmails(max = 5) {
 }
 
 module.exports = {
-  isConfigured, isConnected, getAuthUrl, handleCallback, disconnect,
-  getCalendarEvents, createCalendarEvent,
-  getTasks, createTask, completeTask,
+  isConfigured,
+  getClientId,
+  SCOPES,
+  getCalendarEvents,
+  createCalendarEvent,
+  getTasks,
+  createTask,
+  completeTask,
   getRecentEmails,
 };
