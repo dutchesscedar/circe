@@ -350,15 +350,9 @@ class CirceApp {
 
       // Priority: Enhanced/Premium > specific natural names > any local en-US > any en
       const preferred =
-        enVoices.find(v => v.name.includes('Enhanced') && v.name.includes('Samantha')) ||
-        enVoices.find(v => v.name.includes('Enhanced') && v.name.includes('Ava')) ||
-        enVoices.find(v => v.name.includes('Enhanced')) ||
-        enVoices.find(v => v.name.includes('Premium')) ||
-        enVoices.find(v => v.name === 'Samantha') ||
-        enVoices.find(v => v.name === 'Karen') ||
         enVoices.find(v => v.name === 'Moira') ||
-        enVoices.find(v => v.lang === 'en-US' && v.localService && !v.name.includes('Google')) ||
-        enVoices.find(v => v.lang === 'en-US');
+        enVoices.find(v => v.name.includes('Enhanced')) ||
+        enVoices.find(v => v.lang === 'en-US' && v.localService);
       if (preferred) utterance.voice = preferred;
 
       utterance.onend = () => {
