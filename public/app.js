@@ -100,6 +100,10 @@ class CirceApp {
         callback: (response) => {
           if (response.error) {
             console.error('Google sign-in error:', response.error);
+            // Silent refresh failed — clear the stale token and show disconnected
+            this.googleToken = null;
+            sessionStorage.removeItem('google_token');
+            this.loadConnectionStatus(false);
             return;
           }
           this.googleToken = response.access_token;
@@ -115,8 +119,13 @@ class CirceApp {
         },
       });
 
-      this.loadConnectionStatus(!!this.googleToken);
-      if (this.googleToken) this.syncWithGoogle();
+      if (this.googleToken) {
+        // Silently validate and refresh the stored token on every page load.
+        // The callback handles success (fresh token + timer) and failure (clears stale token).
+        this.tokenClient.requestAccessToken({ prompt: '' });
+      } else {
+        this.loadConnectionStatus(false);
+      }
     } catch (e) {
       console.error('Google init error:', e);
       this.loadConnectionStatus(false);
