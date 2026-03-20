@@ -35,6 +35,24 @@ app.get('/api/google-client-id', (req, res) => {
   res.json({ clientId: google.getClientId() || null });
 });
 
+// Syncs local-only tasks up to Google, then returns the authoritative Google task list
+app.post('/api/tasks/sync', async (req, res) => {
+  const { googleToken, pendingTasks = [] } = req.body;
+  if (!googleToken || !google.isConfigured()) {
+    return res.status(400).json({ error: 'Google not connected' });
+  }
+  try {
+    for (const task of pendingTasks) {
+      await google.createTask(googleToken, { title: task.title, notes: task.notes || '', due: task.due || '' });
+    }
+    const tasks = await google.getTasks(googleToken);
+    res.json({ tasks });
+  } catch(e) {
+    const msg = e?.errors?.[0]?.message || e.message;
+    res.status(500).json({ error: msg });
+  }
+});
+
 app.get('/api/connections', (req, res) => {
   res.json({
     google: { configured: google.isConfigured() },
@@ -250,7 +268,7 @@ function runLocalTool(name, input, localData) {
 
   if (name === 'local_task') {
     if (input.action === 'add') {
-      const t = { id: Date.now(), title: input.task, done: false, created: new Date().toISOString() };
+      const t = { id: Date.now(), title: input.task, done: false, created: new Date().toISOString(), googleId: null };
       tasks.push(t);
       return { result: `Added: "${input.task}"`, tasks };
     }

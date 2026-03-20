@@ -104,13 +104,39 @@ class CirceApp {
           this.googleToken = response.access_token;
           sessionStorage.setItem('google_token', response.access_token);
           this.loadConnectionStatus(true);
+          this.syncWithGoogle();
         },
       });
 
       this.loadConnectionStatus(!!this.googleToken);
+      if (this.googleToken) this.syncWithGoogle();
     } catch (e) {
       console.error('Google init error:', e);
       this.loadConnectionStatus(false);
+    }
+  }
+
+  async syncWithGoogle() {
+    if (!this.googleToken) return;
+    // Local tasks with no googleId were created while offline
+    const pending = (this.data.tasks || []).filter(t => !t.googleId && !t.done);
+    try {
+      const res = await fetch('/api/tasks/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ googleToken: this.googleToken, pendingTasks: pending }),
+      });
+      if (!res.ok) return;
+      const { tasks } = await res.json();
+      this.saveData({ tasks });
+      if (pending.length > 0) {
+        const n = pending.length;
+        const msg = `I found ${n} task${n > 1 ? 's' : ''} you saved while offline. I've added ${n > 1 ? 'them' : 'it'} to Google for you.`;
+        this.addBubble('circe', msg);
+        await this.speak(msg);
+      }
+    } catch(e) {
+      console.error('Task sync error:', e);
     }
   }
 
