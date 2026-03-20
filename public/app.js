@@ -81,13 +81,24 @@ class CirceApp {
   updateCalendarDisplay() {
     const el = document.getElementById('calendar-list');
     if (!el) return;
-    const events = this.calendarData;
-    if (!events || events.length === 0) {
+
+    // Merge Google calendar events with local schedule entries
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const localEvents = (this.data.schedule || []).map(e => ({
+      id: e.id,
+      title: e.event || e.title || '',
+      start: e.date ? (e.time ? `${e.date}T${e.time}` : e.date) : '',
+    }));
+    const seen = new Set((this.calendarData || []).map(e => e.id));
+    const events = [
+      ...(this.calendarData || []),
+      ...localEvents.filter(e => !seen.has(e.id) && e.start >= todayStr),
+    ];
+
+    if (events.length === 0) {
       el.innerHTML = '<div class="no-events">No upcoming events</div>';
       return;
     }
-
-    const todayStr = new Date().toISOString().slice(0, 10);
     // Group events by date
     const byDay = {};
     for (const e of events) {
@@ -118,6 +129,8 @@ class CirceApp {
   }
 
   async refreshSidebar() {
+    // Always redraw calendar from local data; only hit the server if Google is connected
+    this.updateCalendarDisplay();
     if (!this.googleToken) return;
     try {
       const res = await fetch('/api/sidebar', {
@@ -390,6 +403,8 @@ class CirceApp {
 
       this.addBubble('circe', json.response);
       await this.speak(json.response);
+      // Refresh sidebar after each turn so newly created tasks/events appear
+      this.refreshSidebar();
 
     } catch (err) {
       console.error(err);
