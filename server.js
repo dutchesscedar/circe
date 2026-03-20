@@ -130,7 +130,7 @@ function buildSystemPrompt(localData, external) {
         const start = e.start
           ? new Date(e.start).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
           : (e.date || '');
-        return `  - ${start}: ${e.title || e.event}${e.location ? ' @ ' + e.location : ''}`;
+        return `  - [${e.id}] ${start}: ${e.title || e.event}${e.location ? ' @ ' + e.location : ''}`;
       }).join('\n')
     : '  None';
 
@@ -255,6 +255,19 @@ const tools = [
       required: ["task_id", "source"],
     },
   },
+  {
+    name: "delete_calendar_event",
+    description: "Delete an event from Google Calendar or Outlook",
+    input_schema: {
+      type: "object",
+      properties: {
+        event_id: { type: "string" },
+        source: { type: "string", enum: ["google", "microsoft"] },
+        title: { type: "string", description: "Event title, for confirmation message" },
+      },
+      required: ["event_id", "source"],
+    },
+  },
 ];
 
 // ── Tool execution ────────────────────────────────────────────────────────────
@@ -356,6 +369,18 @@ async function runExternalTool(name, input, googleToken) {
         return 'Task marked complete in Microsoft To Do.';
       }
       return 'Could not complete task.';
+    }
+
+    if (name === 'delete_calendar_event') {
+      if (input.source === 'google' && googleToken) {
+        await google.deleteCalendarEvent(googleToken, input.event_id);
+        return `Deleted from Google Calendar: "${input.title || input.event_id}"`;
+      }
+      if (input.source === 'microsoft' && microsoft.isConnected()) {
+        await microsoft.deleteCalendarEvent(input.event_id);
+        return `Deleted from Outlook: "${input.title || input.event_id}"`;
+      }
+      return 'No calendar connected.';
     }
 
     return 'Unknown tool';

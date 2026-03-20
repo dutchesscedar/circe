@@ -67,6 +67,12 @@ async function createCalendarEvent(accessToken, { title, start, end, location, d
   return res.data;
 }
 
+async function deleteCalendarEvent(accessToken, eventId) {
+  const auth = makeAuthClient(accessToken);
+  const cal = google.calendar({ version: 'v3', auth });
+  await cal.events.delete({ calendarId: 'primary', eventId });
+}
+
 // Returns normalized tasks: { id, title, notes, due, source }
 async function getTasks(accessToken) {
   const auth = makeAuthClient(accessToken);
@@ -129,6 +135,7 @@ module.exports = {
   SCOPES,
   getCalendarEvents,
   createCalendarEvent,
+  deleteCalendarEvent,
   getTasks,
   createTask,
   completeTask,
