@@ -43,6 +43,16 @@ A voice-activated web app named Circe. Activated by saying "Hey Circe". Always r
 - Settings UI saves to `config.json` (also gitignored), which takes priority over `.env`
 - Google access token is short-lived (1 hr), stored in sessionStorage, refreshed via GIS
 
+## Testing
+
+**All new features must include unit tests.** No exceptions.
+
+- Tests live in `tests/` and run with `npm test` (Jest)
+- New server-side functions → test in `tests/localTools.test.js` or a new file
+- New API endpoints → test in `tests/endpoints.test.js` (use supertest)
+- New utility/encoding logic → test in a focused file like `tests/emailEncoding.test.js`
+- Run `npm test` before committing — all 34 (or more) tests must pass
+
 ## Architecture
 
 - `server.js` — Express server, Claude API proxy, tool execution, OAuth routes
