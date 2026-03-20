@@ -5,7 +5,7 @@ const google = require('./integrations/google');
 const config = require('./config');
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '100kb' }));
 app.use(express.static('public'));
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -37,7 +37,8 @@ app.get('/api/google-client-id', (req, res) => {
 
 // Syncs local-only tasks up to Google, then returns the authoritative Google task list
 app.post('/api/tasks/sync', async (req, res) => {
-  const { googleToken, pendingTasks = [] } = req.body;
+  const { googleToken, pendingTasks: rawPending = [] } = req.body;
+  const pendingTasks = Array.isArray(rawPending) ? rawPending.slice(0, 100) : [];
   if (!googleToken || !google.isConfigured()) {
     return res.status(400).json({ error: 'Google not connected' });
   }
@@ -376,20 +377,29 @@ async function runExternalTool(name, input, googleToken) {
 
 app.post('/api/chat', async (req, res) => {
   const { messages, localData = {}, googleToken, useConsultant = false } = req.body;
+
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return res.status(400).json({ error: 'Messages are required.' });
+  }
+
   const model = useConsultant ? 'claude-opus-4-6' : 'claude-sonnet-4-6';
 
   try {
     const external = await fetchExternalData(googleToken);
     const systemPrompt = buildSystemPrompt(localData, external);
 
-    let currentMessages = [...messages];
+    let currentMessages = messages.slice(-50); // cap history sent to Claude
     let updatedLocalData = {
       tasks: localData.tasks || [],
       students: localData.students || {},
       schedule: localData.schedule || [],
     };
 
+    let iterations = 0;
     while (true) {
+      if (++iterations > 10) {
+        return res.status(500).json({ error: 'Request took too long to process. Please try again.' });
+      }
       const response = await anthropic.messages.create({
         model,
         max_tokens: 512,
@@ -434,7 +444,11 @@ app.post('/api/chat', async (req, res) => {
 // ── Start ─────────────────────────────────────────────────────────────────────
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`\n✨ Circe is running at http://localhost:${PORT}\n`);
-  if (google.isConfigured()) console.log('  ✓ Google Client ID configured');
-});
+if (require.main === module) {
+  app.listen(PORT, '127.0.0.1', () => {
+    console.log(`\n✨ Circe is running at http://localhost:${PORT}\n`);
+    if (google.isConfigured()) console.log('  ✓ Google Client ID configured');
+  });
+}
+
+module.exports = { app, runLocalTool, buildSystemPrompt };

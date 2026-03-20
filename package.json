@@ -4,14 +4,17 @@
   "description": "Kate's personal voice assistant",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "jest --testEnvironment node"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.54.0",
-    "@azure/msal-node": "^3.8.10",
-    "axios": "^1.13.6",
     "dotenv": "^17.3.1",
     "express": "^4.18.2",
     "googleapis": "^171.4.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^7.0.0"
   }
 }
