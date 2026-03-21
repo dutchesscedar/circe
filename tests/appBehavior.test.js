@@ -274,19 +274,43 @@ describe('chat mode', () => {
     expect(app.state).toBe('standby');
   });
 
-  test('after speak() in chat mode, app re-activates to "listening"', async () => {
+  test('after speak() in chat mode, state goes directly to "listening" (no standby gap)', async () => {
     const app = makeApp();
     app.toggleConversationMode(true);
     expect(app.state).toBe('listening');
 
-    // Simulate a response being spoken
     const p = app.speak('Here is my answer');
-    synth.resolveAll(); // speak ends → done() → state = standby
+    synth.resolveAll(); // speak ends → done() → state = listening (not standby)
     await p;
 
-    // Chat mode re-activates
-    app.activate();
+    // State should be listening WITHOUT needing a separate activate() call
     expect(app.state).toBe('listening');
+  });
+
+  test('in chat mode, listening does NOT auto-timeout after 12 seconds', () => {
+    const app = makeApp();
+    app.toggleConversationMode(true);
+    expect(app.state).toBe('listening');
+
+    jest.advanceTimersByTime(15000); // well past the 12s non-chat timeout
+    expect(app.state).toBe('listening'); // still listening
+  });
+
+  test('in chat mode, "end chat mode" returns to standby', () => {
+    const app = makeApp();
+    app.toggleConversationMode(true);
+
+    // Simulate the user saying "end chat mode" via barge-in while speaking
+    app.speak('Going on');
+    jest.advanceTimersByTime(600);
+    const event = {
+      resultIndex: 0,
+      results: [{ isFinal: true, 0: { transcript: 'end chat mode' }, length: 1 }],
+    };
+    event.results.length = 1;
+    // processCommand is async but toggleConversationMode is sync
+    app.processCommand('end chat mode');
+    expect(app.conversationMode).toBe(false);
   });
 });
 

@@ -562,7 +562,10 @@ class CirceApp {
     this.interimEl.textContent = '';
     this.playChime();
 
-    // Auto-timeout after 12 seconds of silence
+    // In chat mode the mic stays open indefinitely — no timeout
+    if (this.conversationMode) return;
+
+    // Outside chat mode: auto-timeout after 12 seconds of silence
     clearTimeout(this.listenTimeout);
     this.listenTimeout = setTimeout(() => {
       if (this.state === 'listening') {
@@ -636,19 +639,20 @@ class CirceApp {
       document.querySelectorAll('.completion-picker').forEach(el => el.remove());
     }
 
+    if (this.conversationMode && /\b(end chat mode|stop chat mode|chat mode off|stop listening|goodbye|that'?s all|done|bye)\b/.test(lc)) {
+      this.toggleConversationMode(false);
+      const msg = 'Okay, going quiet. Say "Hey Circe" whenever you need me.';
+      this.addBubble('circe', msg);
+      await this.speak(msg);
+      return;
+    }
+
     if (/\b(start chat mode|chat mode on|chat mode|keep listening|stay on)\b/.test(lc)) {
       this.toggleConversationMode(true);
       const msg = 'Chat mode on. I\'ll keep listening after each response. Say "end chat mode" or "stop listening" when you\'re done.';
       this.addBubble('circe', msg);
       await this.speak(msg);
       this.toggleConversationMode(true); // re-activate after speaking
-      return;
-    }
-    if (this.conversationMode && /\b(end chat mode|stop chat mode|chat mode off|stop listening|goodbye|that'?s all|done|bye)\b/.test(lc)) {
-      this.toggleConversationMode(false);
-      const msg = 'Okay, going quiet. Say "Hey Circe" whenever you need me.';
-      this.addBubble('circe', msg);
-      await this.speak(msg);
       return;
     }
 
@@ -718,7 +722,10 @@ class CirceApp {
     }
 
     if (this.conversationMode) {
-      this.activate();
+      // done() in speak() already set state to 'listening'; recover if speak() wasn't called
+      if (this.state !== 'listening') {
+        this.setState('listening', 'Listening…');
+      }
     } else {
       this.setState('standby', "Say \"Hey Circe\" to begin");
     }
@@ -805,7 +812,12 @@ class CirceApp {
         clearTimeout(watchdog);
         clearTimeout(this._bargeInTimer);
         this.bargeInReady = false;
-        this.setState('standby', 'Say "Hey Circe" to begin');
+        // In chat mode go straight to listening — skip standby to avoid the wake-word gap
+        if (this.conversationMode) {
+          this.setState('listening', 'Listening…');
+        } else {
+          this.setState('standby', 'Say "Hey Circe" to begin');
+        }
         resolve();
       };
 
