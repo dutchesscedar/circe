@@ -468,3 +468,53 @@ describe('completion picker — number/word intercept', () => {
     expect(getSent()).toBe('actually never mind');
   });
 });
+
+// ── Echo detection (_isEcho) ──────────────────────────────────────────────────
+
+describe('_isEcho()', () => {
+  test('returns false when _speakingText is empty', () => {
+    const app = makeApp();
+    app._speakingText = '';
+    expect(app._isEcho('your tasks are grade papers and call the parent')).toBe(false);
+  });
+
+  test('returns false for short recognized text (< 3 meaningful words)', () => {
+    const app = makeApp();
+    app._speakingText = 'Your tasks are grade papers and call the parent today';
+    expect(app._isEcho('stop')).toBe(false);
+    expect(app._isEcho('yes')).toBe(false);
+    expect(app._isEcho('what time')).toBe(false);
+  });
+
+  test('flags high-overlap long echo as echo', () => {
+    const app = makeApp();
+    app._speakingText = 'Your tasks are grade papers call parent file report done today';
+    // Recognition hears most of what Circe just said
+    expect(app._isEcho('tasks grade papers call parent file report')).toBe(true);
+  });
+
+  test('passes through a real user barge-in (low overlap)', () => {
+    const app = makeApp();
+    app._speakingText = 'Your IEP meeting is scheduled for tomorrow morning at nine';
+    expect(app._isEcho('what time does school start')).toBe(false);
+  });
+
+  test('flags "end chat mode" echo when Circe just said it', () => {
+    const app = makeApp();
+    app._speakingText = 'Chat mode is on. Say end chat mode or stop listening when done.';
+    expect(app._isEcho('end chat mode stop listening when done')).toBe(true);
+  });
+
+  test('passes through "end chat mode" when Circe is not saying it', () => {
+    const app = makeApp();
+    app._speakingText = 'Your schedule for today includes three meetings and lunch duty';
+    expect(app._isEcho('end chat mode')).toBe(false); // only 2 meaningful words
+  });
+
+  test('does not block short commands even when word appears in speaking text', () => {
+    const app = makeApp();
+    app._speakingText = 'You have five tasks: grade papers, call parent, file report, attend meeting, submit grades';
+    expect(app._isEcho('stop')).toBe(false);
+    expect(app._isEcho('grade')).toBe(false);
+  });
+});

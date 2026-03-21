@@ -45,7 +45,7 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 app.get('/api/settings', (req, res) => {
   res.json({
     GOOGLE_CLIENT_ID: config.get('GOOGLE_CLIENT_ID'),
-    TTS_VOICE: config.get('TTS_VOICE') || 'Samantha',
+    TTS_VOICE: config.get('TTS_VOICE') || 'Karen',
   });
 });
 

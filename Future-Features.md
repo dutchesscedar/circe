@@ -10,7 +10,7 @@ Claude reads this file and considers outstanding requests when answering current
 | Feature | Notes |
 |---|---|
 | Wake word detection ("Hey Circe") | Phonetic variants supported |
-| Voice synthesis (TTS) | Moira/Enhanced voice preferred; watchdog for browser TTS blocking |
+| Voice synthesis (TTS) | macOS `say` via server (`/api/tts`); Karen voice hardcoded; voice picker in settings; falls back to browser TTS; echo filter prevents self-hearing in chat mode |
 | Speech recognition (continuous) | Auto-restarts; wake word + chat mode flows |
 | Chat mode | Button toggle + voice commands ("start chat mode", "end chat mode", "stop listening"); pulsing dot indicator |
 | Two-model Claude setup | Sonnet for fast replies; Opus escalation via "my advisor" |
@@ -106,6 +106,19 @@ Circe should recognize and respond consistently to a standard set of commands:
 ## 🟡 Significant Effort — Needs Planning Before Starting
 
 These are feasible but require a meaningful architecture expansion.
+
+### OpenAI TTS (nova / shimmer voices)
+- Replace macOS `say` with OpenAI's `tts-1` or `tts-1-hd` model
+- Voices `nova` and `shimmer` are warm, natural-sounding, and consistent cross-platform
+- ~$15/million characters — practically free for personal use
+- No custom voice cloning (see ElevenLabs for that)
+- **Implementation:** swap `/api/tts` to call OpenAI API instead of `execFile('say')`; stream MP3 back to browser; fallback to `say` if API key absent
+- **Dependency:** requires `OPENAI_API_KEY` in `.env`
+
+### ElevenLabs Custom Voice
+- Clone a specific voice Kate likes using ~5 minutes of audio samples
+- Subscription ~$5/month for personal use volume
+- **Implementation:** same `/api/tts` swap as OpenAI TTS above; add `ELEVENLABS_API_KEY` config
 
 ### Cross-Calendar Sync (non-Google)
 - Connect phone calendar, watch (via iCloud), Alexa, Siri

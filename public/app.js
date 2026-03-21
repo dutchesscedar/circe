@@ -20,9 +20,10 @@ class CirceApp {
     this.calendarData = [];    // latest calendar events from server
     this.conversationMode = false; // when on, Circe re-listens after each response
     this.pendingCompletions = []; // options shown to Duchess; next number/word selects one
-    this.ttsVoice = 'Samantha';   // macOS say voice; loaded from settings on init
+    this.ttsVoice = 'Karen';      // macOS say voice; loaded from settings on init
     this._useMacOSTTS = false;    // set to true once loadTTSVoice() confirms server is up
     this._currentTTSAudio = null; // current HTMLAudioElement playing macOS TTS
+    this._speakingText = '';      // text Circe is currently saying; used for echo detection
 
     this.statusEl = document.getElementById('status-text');
     this.interimEl = document.getElementById('interim-text');
@@ -519,9 +520,13 @@ class CirceApp {
     const wakeWords = ['circe', 'surce', 'searcy', 'searsy', 'sirsy', 'percy', 'mercy', 'sir-c', 'sirc'];
 
     if (this.state === 'speaking' && this.bargeInReady) {
-      // Barge-in: user spoke while Circe was talking
+      // Barge-in: user spoke while Circe was talking.
+      // Echo filter: if the recognized text is too similar to what Circe is saying,
+      // it's acoustic feedback from the speakers — drop it silently.
+      if (final.trim() && this._isEcho(final.trim())) return;
+
       if (this.conversationMode) {
-        // Chat mode: any utterance interrupts and gets processed as a command
+        // Chat mode: any non-echo utterance interrupts and gets processed as a command
         if (final.trim().length > 2) {
           this.cancelTTS();
           const cleaned = final.trim().replace(/^(hey\s+)?(circe|surce|searcy|searsy|sirsy|percy|mercy|sir-c|sirc)[,.]?\s*/i, '').trim();
@@ -786,6 +791,7 @@ class CirceApp {
   speak(text) {
     return new Promise((resolve) => {
       this.setState('speaking', 'Speaking…');
+      this._speakingText = text;  // used by echo detector in onSpeechResult
 
       // Grace period: don't allow barge-in for the first 600ms so the mic
       // doesn't catch the very start of Circe's own voice and self-interrupt
@@ -802,6 +808,7 @@ class CirceApp {
         clearTimeout(this._bargeInTimer);
         this.bargeInReady = false;
         this._currentTTSAudio = null;
+        this._speakingText = '';    // clear echo buffer
         // In chat mode go straight to listening — skip standby to avoid the wake-word gap
         if (this.conversationMode) {
           this.setState('listening', 'Listening…');
@@ -860,6 +867,20 @@ class CirceApp {
     setTimeout(() => {
       if (!finished && !speechSynthesis.speaking && !speechSynthesis.pending) done();
     }, 1000);
+  }
+
+  // Returns true if `recognized` is likely acoustic echo of what Circe is currently saying.
+  // Uses meaningful-word overlap: skips short function words, requires a minimum word count,
+  // and flags as echo only when the majority of words already appear in _speakingText.
+  _isEcho(recognized) {
+    if (!this._speakingText || !recognized) return false;
+    // Extract words of 4+ chars (ignores "the", "and", "is", etc.)
+    const words = s => (s.toLowerCase().match(/\b[a-z]{4,}\b/g) || []);
+    const recWords = words(recognized);
+    if (recWords.length < 3) return false; // too short to judge — let short commands through
+    const speakSet = new Set(words(this._speakingText));
+    const overlap = recWords.filter(w => speakSet.has(w)).length;
+    return overlap / recWords.length > 0.6;
   }
 
   cancelTTS() {
