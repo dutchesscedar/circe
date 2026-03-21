@@ -550,6 +550,16 @@
     <p style="color:#6b6b8a; font-size:0.85rem; margin-bottom:24px;">Enter your Google Client ID to connect your calendar, tasks, and email. Saved only on your computer.</p>
 
     <div class="settings-section">
+      <h3>Voice</h3>
+      <p class="settings-hint">Circe's speaking voice. Download more voices in <strong>System Settings → Accessibility → Spoken Content → System Voice → Customize</strong> for higher-quality options.</p>
+      <label>Voice</label>
+      <select id="s-tts-voice" style="width:100%; background:#0f0f1a; border:1px solid #3a3a5a; border-radius:8px; padding:9px 12px; color:#e0e0f0; font-size:0.9rem; margin-bottom:12px; outline:none;">
+        <option value="">Loading voices…</option>
+      </select>
+      <button style="background:#3a3a5a; color:#c0c0e0; border:none; border-radius:6px; padding:6px 14px; cursor:pointer; font-size:0.8rem;" onclick="app && app.previewVoice()">▶ Preview</button>
+    </div>
+
+    <div class="settings-section">
       <h3>Google <span style="font-weight:300; color:#6b6b8a;">(Calendar, Tasks, Gmail)</span></h3>
       <p class="settings-hint">Only a Client ID is needed — no secret required. <a href="/setup-google.html" target="_blank">Step-by-step setup guide ↗</a></p>
       <label>Client ID</label>
@@ -560,7 +570,7 @@
       <button class="save-btn" onclick="app && app.saveSettings()">Save</button>
       <button class="cancel-btn" onclick="app && app.closeSettings()">Cancel</button>
     </div>
-    <p id="settings-msg" style="margin-top:12px; font-size:0.85rem; color:#4ade80; display:none;">Saved. Click Connect next to Google.</p>
+    <p id="settings-msg" style="margin-top:12px; font-size:0.85rem; color:#4ade80; display:none;">Saved.</p>
   </div>
 </div>
 

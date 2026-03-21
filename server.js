@@ -3,6 +3,11 @@ const express = require('express');
 const Anthropic = require('@anthropic-ai/sdk');
 const google = require('./integrations/google');
 const config = require('./config');
+const { execFile } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const crypto = require('crypto');
 
 const app = express();
 app.use(express.json({ limit: '100kb' }));
@@ -40,11 +45,12 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 app.get('/api/settings', (req, res) => {
   res.json({
     GOOGLE_CLIENT_ID: config.get('GOOGLE_CLIENT_ID'),
+    TTS_VOICE: config.get('TTS_VOICE') || 'Samantha',
   });
 });
 
 app.post('/api/settings', (req, res) => {
-  const allowed = ['GOOGLE_CLIENT_ID'];
+  const allowed = ['GOOGLE_CLIENT_ID', 'TTS_VOICE'];
   const update = {};
   for (const key of allowed) {
     if (req.body[key] !== undefined && req.body[key] !== '') {
@@ -53,6 +59,60 @@ app.post('/api/settings', (req, res) => {
   }
   config.save(update);
   res.json({ ok: true });
+});
+
+// ── TTS (macOS say) ───────────────────────────────────────────────────────────
+
+// GET /api/tts/voices — list installed macOS English voices
+app.get('/api/tts/voices', (req, res) => {
+  execFile('say', ['-v', '?'], (err, stdout) => {
+    if (err) return res.json({ voices: [] });
+    const voices = stdout.split('\n')
+      .filter(line => /\ben_/.test(line))
+      .map(line => {
+        const match = line.match(/^(.+?)\s{2,}(\w+_\w+)\s+#\s*(.*)$/);
+        if (!match) return null;
+        return { name: match[1].trim(), lang: match[2], description: match[3].trim() };
+      })
+      .filter(Boolean);
+    res.json({ voices });
+  });
+});
+
+// POST /api/tts — generate speech audio for a given text + voice
+// Returns WAV audio. Uses execFile (not exec) to prevent shell injection.
+app.post('/api/tts', (req, res) => {
+  const { text, voice } = req.body || {};
+  if (!text || typeof text !== 'string' || text.trim().length === 0) {
+    return res.status(400).json({ error: 'text required' });
+  }
+  // Only allow safe characters in voice name to prevent any injection path
+  const safeVoice = (voice || 'Samantha').replace(/[^a-zA-Z0-9 ()]/g, '').trim() || 'Samantha';
+
+  const id = crypto.randomBytes(8).toString('hex');
+  const aiffPath = path.join(os.tmpdir(), `circe_tts_${id}.aiff`);
+  const wavPath  = path.join(os.tmpdir(), `circe_tts_${id}.wav`);
+
+  const cleanup = () => {
+    try { fs.unlinkSync(aiffPath); } catch (_) {}
+    try { fs.unlinkSync(wavPath); }  catch (_) {}
+  };
+
+  // Step 1: generate AIFF via say (no shell, args passed as array)
+  execFile('say', ['-v', safeVoice, '-o', aiffPath, text], (err) => {
+    if (err) { cleanup(); return res.status(500).json({ error: 'TTS generation failed' }); }
+
+    // Step 2: convert AIFF → WAV using afconvert (built into macOS, no install needed)
+    execFile('afconvert', [aiffPath, '-o', wavPath, '-f', 'WAVE', '-d', 'LEI16@22050'], (err2) => {
+      if (err2) { cleanup(); return res.status(500).json({ error: 'Audio conversion failed' }); }
+
+      res.setHeader('Content-Type', 'audio/wav');
+      const stream = fs.createReadStream(wavPath);
+      stream.on('end', cleanup);
+      stream.on('error', () => { cleanup(); res.end(); });
+      stream.pipe(res);
+    });
+  });
 });
 
 // Returns the Google Client ID so the browser can initialize GIS

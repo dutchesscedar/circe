@@ -20,6 +20,9 @@ class CirceApp {
     this.calendarData = [];    // latest calendar events from server
     this.conversationMode = false; // when on, Circe re-listens after each response
     this.pendingCompletions = []; // options shown to Duchess; next number/word selects one
+    this.ttsVoice = 'Samantha';   // macOS say voice; loaded from settings on init
+    this._useMacOSTTS = false;    // set to true once loadTTSVoice() confirms server is up
+    this._currentTTSAudio = null; // current HTMLAudioElement playing macOS TTS
 
     this.statusEl = document.getElementById('status-text');
     this.interimEl = document.getElementById('interim-text');
@@ -29,6 +32,7 @@ class CirceApp {
     this.updateTaskDisplay();
     this.updateCalendarDisplay();
     this.initGoogle();      // sets up GIS, then loads connection status
+    this.loadTTSVoice();    // read saved voice preference from server settings
 
     if (!SpeechRecognition) {
       document.getElementById('error-banner').style.display = 'block';
@@ -519,7 +523,7 @@ class CirceApp {
       if (this.conversationMode) {
         // Chat mode: any utterance interrupts and gets processed as a command
         if (final.trim().length > 2) {
-          speechSynthesis.cancel();
+          this.cancelTTS();
           const cleaned = final.trim().replace(/^(hey\s+)?(circe|surce|searcy|searsy|sirsy|percy|mercy|sir-c|sirc)[,.]?\s*/i, '').trim();
           if (cleaned.length > 1) this.processCommand(cleaned);
           else this.activate();
@@ -527,7 +531,7 @@ class CirceApp {
       } else {
         // Outside chat mode: only the wake word interrupts
         if (wakeWords.some(w => combined.includes(w))) {
-          speechSynthesis.cancel();
+          this.cancelTTS();
           this.setState('standby', 'Say "Hey Circe" to begin');
           this.activate();
         }
@@ -578,14 +582,14 @@ class CirceApp {
   handleOrbClick() {
     if (this.conversationMode) {
       // Clicking orb exits conversation mode
-      speechSynthesis.cancel();
+      this.cancelTTS();
       this.toggleConversationMode(false);
       return;
     }
     if (this.state === 'standby') {
       this.activate();
     } else if (this.state === 'speaking') {
-      speechSynthesis.cancel();
+      this.cancelTTS();
       this.setState('standby', "Say \"Hey Circe\" to begin");
     }
   }
@@ -596,11 +600,11 @@ class CirceApp {
     if (btn) btn.classList.toggle('active', this.conversationMode);
     if (this.conversationMode) {
       // Force back to standby first in case the app is stuck in another state
-      speechSynthesis.cancel();
+      this.cancelTTS();
       this.setState('standby', 'Chat mode — listening after each response');
       this.activate();
     } else {
-      speechSynthesis.cancel();
+      this.cancelTTS();
       this.setState('standby', "Say \"Hey Circe\" to begin");
     }
   }
@@ -609,7 +613,7 @@ class CirceApp {
 
   async processCommand(text) {
     clearTimeout(this.listenTimeout);
-    if (speechSynthesis.speaking) speechSynthesis.cancel();
+    this.cancelTTS();
 
     // Handle client-side commands (no server round-trip needed)
     const lc = text.toLowerCase().trim();
@@ -789,21 +793,6 @@ class CirceApp {
       clearTimeout(this._bargeInTimer);
       this._bargeInTimer = setTimeout(() => { this.bargeInReady = true; }, 600);
 
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 0.9;
-      utterance.pitch = 1.0;
-      utterance.volume = 1.0;
-
-      const voices = speechSynthesis.getVoices();
-      const enVoices = voices.filter(v => v.lang.startsWith('en'));
-
-      // Priority: Enhanced/Premium > specific natural names > any local en-US > any en
-      const preferred =
-        enVoices.find(v => v.name === 'Moira') ||
-        enVoices.find(v => v.name.includes('Enhanced')) ||
-        enVoices.find(v => v.lang === 'en-US' && v.localService);
-      if (preferred) utterance.voice = preferred;
-
       // done() resets state — called once regardless of path
       let finished = false;
       const done = () => {
@@ -812,6 +801,7 @@ class CirceApp {
         clearTimeout(watchdog);
         clearTimeout(this._bargeInTimer);
         this.bargeInReady = false;
+        this._currentTTSAudio = null;
         // In chat mode go straight to listening — skip standby to avoid the wake-word gap
         if (this.conversationMode) {
           this.setState('listening', 'Listening…');
@@ -821,24 +811,75 @@ class CirceApp {
         resolve();
       };
 
-      utterance.onend   = done;
-      utterance.onerror = done;
-
-      // Watchdog: Chrome sometimes silently drops utterances (autoplay policy,
-      // voices not loaded, etc.) and never fires onend/onerror — recover after
-      // a generous estimate of speaking time so the app doesn't freeze.
+      // Watchdog: recover if audio never fires ended/error after a generous estimate
       const estimatedMs = Math.max(5000, text.length * 60);
       const watchdog = setTimeout(done, estimatedMs);
 
-      speechSynthesis.speak(utterance);
-
-      // Secondary check: if the browser queued but never started within 1s, recover
-      setTimeout(() => {
-        if (!finished && !speechSynthesis.speaking && !speechSynthesis.pending) {
-          done();
-        }
-      }, 1000);
+      if (this._useMacOSTTS) {
+        // Use macOS say via server — produces much more natural audio
+        fetch('/api/tts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text, voice: this.ttsVoice }),
+        }).then(res => {
+          if (!res.ok) throw new Error('tts error');
+          return res.blob();
+        }).then(blob => {
+          const url = URL.createObjectURL(blob);
+          const audio = new Audio(url);
+          this._currentTTSAudio = audio;
+          audio.onended = () => { URL.revokeObjectURL(url); done(); };
+          audio.onerror = () => { URL.revokeObjectURL(url); done(); };
+          audio.play().catch(() => done());
+        }).catch(() => {
+          // macOS TTS failed mid-session; fall back to browser
+          this._speakViaBrowser(text, done, finished);
+        });
+      } else {
+        // Browser Web Speech API (also used as fallback)
+        this._speakViaBrowser(text, done, finished);
+      }
     });
+  }
+
+  _speakViaBrowser(text, done, finished) {
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 0.9;
+    utterance.pitch = 1.0;
+    utterance.volume = 1.0;
+    const voices = speechSynthesis.getVoices();
+    const enVoices = voices.filter(v => v.lang.startsWith('en'));
+    const preferred =
+      enVoices.find(v => v.name.includes('Enhanced')) ||
+      enVoices.find(v => v.lang === 'en-US' && v.localService);
+    if (preferred) utterance.voice = preferred;
+    utterance.onend   = done;
+    utterance.onerror = done;
+    speechSynthesis.speak(utterance);
+    // Secondary check: if browser silently drops utterance within 1s, recover
+    setTimeout(() => {
+      if (!finished && !speechSynthesis.speaking && !speechSynthesis.pending) done();
+    }, 1000);
+  }
+
+  cancelTTS() {
+    // Cancel macOS audio element if active
+    if (this._currentTTSAudio) {
+      this._currentTTSAudio.pause();
+      this._currentTTSAudio = null;
+    }
+    // Also cancel browser TTS in case fallback is in use
+    speechSynthesis.cancel();
+  }
+
+  async loadTTSVoice() {
+    try {
+      const res = await fetch('/api/settings');
+      if (!res.ok) return;
+      const s = await res.json();
+      if (s.TTS_VOICE) this.ttsVoice = s.TTS_VOICE;
+      this._useMacOSTTS = true; // server is up and macOS TTS is available
+    } catch (_) {}
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -904,10 +945,29 @@ class CirceApp {
     modal.style.display = 'flex';
     document.getElementById('settings-msg').style.display = 'none';
     try {
-      const res = await fetch('/api/settings');
-      const s = await res.json();
+      const [settingsRes, voicesRes] = await Promise.all([
+        fetch('/api/settings'),
+        fetch('/api/tts/voices'),
+      ]);
+      const s = await settingsRes.json();
+      const { voices } = await voicesRes.json();
+
       document.getElementById('s-google-id').value = s.GOOGLE_CLIENT_ID || '';
+
+      const sel = document.getElementById('s-tts-voice');
+      const current = s.TTS_VOICE || 'Samantha';
+      sel.innerHTML = voices.map(v =>
+        `<option value="${v.name}"${v.name === current ? ' selected' : ''}>${v.name}</option>`
+      ).join('') || '<option value="Samantha">Samantha</option>';
     } catch(e) {}
+  }
+
+  async previewVoice() {
+    const voice = document.getElementById('s-tts-voice')?.value || this.ttsVoice;
+    const prev = this.ttsVoice;
+    this.ttsVoice = voice;
+    await this.speak('Hi, I\'m Circe. How does this voice sound?');
+    this.ttsVoice = prev; // restore until saved
   }
 
   closeSettings() {
@@ -915,8 +975,11 @@ class CirceApp {
   }
 
   async saveSettings() {
+    const voice = document.getElementById('s-tts-voice')?.value;
+    if (voice) this.ttsVoice = voice;
     const body = {
       GOOGLE_CLIENT_ID: document.getElementById('s-google-id').value,
+      TTS_VOICE: voice || this.ttsVoice,
     };
     await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     document.getElementById('settings-msg').style.display = 'block';
