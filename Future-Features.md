@@ -31,15 +31,13 @@ Claude reads this file and considers outstanding requests when answering current
 | Scan & summarize (web) | `web_fetch` tool fetches any URL server-side, strips HTML, caps at 8KB; SSRF protection built in |
 | Google Drive file search | `google_drive` tool lists recent files or searches by keyword via Drive v3 API |
 | Multiple Google Accounts | Work + personal (or any labels); per-service defaults (cal/tasks/email/drive); sidebar cards with toggle pills; add/disconnect per account; auto-migrates legacy single-token; backwards compatible |
+| Barge-in (voice interrupt) | Mic stays live during TTS; chat mode: any speech interrupts; outside chat mode: wake word interrupts; 600ms grace period prevents self-interruption |
 
 ---
 
 ## 🟢 Ready to Build — Feasible Within Current Architecture
 
 These fit naturally into Circe's existing browser + Claude + Google APIs stack.
-
-### ✅ Prioritized To-Do List — DONE
-Priority (high/medium/low) and owner fields now on all tasks. Sidebar sorts by priority with color badges. Say "set this to high priority" or include priority when adding tasks.
 
 ### Email Management (Expand Gmail)
 - Categorize inbox by subject/sender automatically
@@ -48,18 +46,43 @@ Priority (high/medium/low) and owner fields now on all tasks. Sidebar sorts by p
 - Read full email body ✅ done via `read_email` tool
 - **Design note:** Categorization/flagging needs a Claude-powered layer on top of `getRecentEmails`
 
-### ✅ Scan & Summarize (Web) — DONE
-`web_fetch` tool: paste or say a URL and Circe will fetch, strip, and summarize. SSRF protection built in. Browser extension not needed.
-- Highlight text and have Circe explain or revise it — still needs browser extension approach
+### Task Completion Reports
+- When a task is marked done, generate a summary of what was accomplished and the date completed
+- Maintain a completed-task log that can be reviewed on demand ("Circe, what did I finish this week?")
+- **Design note:** Extend task schema with `completedAt` timestamp + `summary` field; Claude generates the TLDR at completion time; store in localStorage
 
-### ✅ Google Drive Access — DONE
-`google_drive` tool: list recent files or search by keyword. Returns file names + direct links. Requires `drive.readonly` OAuth scope (re-auth needed if previously connected).
+### Deadline Reminders & Time Estimates
+- Proactive reminders of upcoming deadlines (verbal + sidebar)
+- Give time-to-complete estimates when creating or viewing tasks
+- Track how long tasks actually take to help adjust future estimates
+- **Design note:** Needs `dueDate` and `estimatedMinutes` fields on tasks; a polling/check loop to surface reminders; historical duration tracking to improve estimates over time
 
-### ✅ Barge-in support — DONE
-Voice interruption now works in both modes:
-- **Chat mode:** any spoken utterance (after a 600ms grace period) cancels TTS and processes the command
-- **Outside chat mode:** saying "Hey Circe" while Circe is speaking cancels TTS and activates listening
-- Grace period prevents Circe's own voice from triggering self-interruption
+### In-Progress Task Tracking
+- Show in-progress tasks with % done and next steps
+- Project trackers for multi-step tasks that break down all the steps needed
+- Connected to the prioritized to-do list
+- **Design note:** Extend task schema with `status` (not-started / in-progress / done), `percentComplete`, `subtasks[]` array, and `nextStep`; sidebar groups tasks by status
+
+### Aggregated Prioritized To-Do List
+- Build a unified priority list from emails, calendar, voice commands, and student caseload
+- Circe synthesizes across data sources to surface what matters most
+- **Design note:** Claude-powered aggregation layer — on session start or on demand, pull recent emails + calendar events + existing tasks, then rank and merge into one list
+
+### Smart Suggestions / Simplify Workflows
+- Circe proactively offers suggestions to make things easier or simplify a workflow
+- Balance of complete "rightness" and simplicity — don't over-engineer Kate's requests
+- **Design note:** Behavioral/prompt-engineering feature — bake into system prompt and tool-selection logic so Claude looks for opportunities to streamline rather than just executing literally
+
+### Natural Language Command Vocabulary
+Circe should recognize and respond consistently to a standard set of commands:
+- **"Read this"** — read aloud the current content
+- **"Summarize"** — summarize a thread, page, or content
+- **"Remind"** — set a reminder for a specific time or event
+- **"Prioritize"** — re-rank tasks by importance
+- **"Explain"** — explain a concept or passage in plain language
+- **"Consult"** — escalate to the Opus advisor for deeper analysis
+- **"What can you do?"** — spoken help/cheat-sheet of available commands
+- **Design note:** Many of these already work implicitly through Claude's tool routing. This feature is about making the vocabulary explicit and adding a discoverable "what can you do?" help command
 
 ### Customizable Dashboard / Navigation
 - Rearrange sidebar panels
@@ -131,7 +154,7 @@ Flag these as "Phase 2 — Desktop Agent" before any work begins.
 
 When building new features, protect against these future needs:
 
-1. **Task schema is extensible** — always include `id`, `title`, `done`, `googleId`, `source`; adding `priority`, `owner`, `dueDate` should be non-breaking
+1. **Task schema is extensible** — always include `id`, `title`, `done`, `googleId`, `source`; adding `priority`, `owner`, `dueDate`, `completedAt`, `subtasks` should be non-breaking
 2. **Google OAuth scopes** — add new Drive/Calendar scopes before users need them; scope changes require re-auth
 3. **Tool architecture** — server.js `runLocalTool` is the right place for new local data tools; keep side-effect tools (Google, email) in `integrations/google.js`
 4. **If a feature needs a browser extension** — design it as optional; Circe must still work without it
