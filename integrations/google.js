@@ -10,6 +10,7 @@ const SCOPES = [
   'https://www.googleapis.com/auth/tasks',
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/gmail.send',
+  'https://www.googleapis.com/auth/drive.readonly',
 ].join(' ');
 
 function getClientId() {
@@ -146,6 +147,62 @@ async function getRecentEmails(accessToken, max = 5) {
   return emails;
 }
 
+// Returns the full plain-text body of a single email by message ID
+async function getEmailBody(accessToken, messageId) {
+  const auth = makeAuthClient(accessToken);
+  const gmail = google.gmail({ version: 'v1', auth });
+  const detail = await gmail.users.messages.get({ userId: 'me', id: messageId, format: 'full' });
+  const payload = detail.data.payload;
+
+  function extractPart(part, mimeType) {
+    if (part.mimeType === mimeType && part.body?.data) {
+      return Buffer.from(part.body.data, 'base64').toString('utf-8');
+    }
+    if (part.parts) {
+      for (const p of part.parts) {
+        const text = extractPart(p, mimeType);
+        if (text) return text;
+      }
+    }
+    return null;
+  }
+
+  const h = payload.headers || [];
+  const subject = h.find(x => x.name === 'Subject')?.value || '(no subject)';
+  const from = h.find(x => x.name === 'From')?.value || 'Unknown';
+
+  const body =
+    extractPart(payload, 'text/plain') ||
+    (extractPart(payload, 'text/html') || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() ||
+    '(no body)';
+
+  return { subject, from, body: body.slice(0, 4000) };
+}
+
+// Returns a list of Drive files, optionally filtered by a search query
+async function getDriveFiles(accessToken, query = '', maxResults = 10) {
+  const auth = makeAuthClient(accessToken);
+  const drive = google.drive({ version: 'v3', auth });
+
+  const params = {
+    pageSize: maxResults,
+    fields: 'files(id,name,mimeType,modifiedTime,webViewLink)',
+    orderBy: 'modifiedTime desc',
+    q: query
+      ? `fullText contains '${query.replace(/'/g, "\\'")}' and trashed = false`
+      : 'trashed = false',
+  };
+
+  const res = await drive.files.list(params);
+  return (res.data.files || []).map(f => ({
+    id: f.id,
+    name: f.name,
+    type: f.mimeType,
+    modified: f.modifiedTime,
+    url: f.webViewLink,
+  }));
+}
+
 module.exports = {
   isConfigured,
   getClientId,
@@ -158,4 +215,6 @@ module.exports = {
   completeTask,
   getRecentEmails,
   sendEmail,
+  getEmailBody,
+  getDriveFiles,
 };

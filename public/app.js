@@ -10,10 +10,12 @@ class CirceApp {
     this.data = this.loadData();
     this.useConsultant = false;
 
-    // Google token (short-lived, from GIS; refreshed automatically)
-    this.googleToken = sessionStorage.getItem('google_token') || null;
-    this.tokenClient = null;
-    this.tokenRefreshTimer = null;
+    // Multi-account Google support
+    this.clientId = null;
+    this.googleAccounts = this.loadGoogleAccounts(); // [{label, email, token, defaults}]
+    this.tokenClients = {};     // keyed by email (or '_' for unknown/legacy)
+    this.refreshTimers = {};    // keyed by email (or '_')
+    this.pendingAccountLabel = null; // label for the account being added
 
     this.calendarData = [];    // latest calendar events from server
     this.conversationMode = false; // when on, Circe re-listens after each response
@@ -69,11 +71,16 @@ class CirceApp {
       this.taskListEl.innerHTML = '<div class="no-tasks">No tasks yet</div>';
       return;
     }
-    this.taskListEl.innerHTML = pending.map(t => {
+    const priorityOrder = { high: 0, medium: 1, low: 2 };
+    const sorted = [...pending].sort((a, b) => (priorityOrder[a.priority] ?? 3) - (priorityOrder[b.priority] ?? 3));
+    this.taskListEl.innerHTML = sorted.map(t => {
       const isLocal = !t.source && t.googleId === null;
+      const priBadge = t.priority ? `<span class="priority-badge ${t.priority}">${t.priority}</span>` : '';
+      const ownerBadge = t.owner ? `<span class="task-owner">${this.escapeHtml(t.owner)}</span>` : '';
       return `<div class="task-item">
         <div class="task-bullet${isLocal ? ' local' : ''}"></div>
         <span class="task-label">${this.escapeHtml(t.title)}</span>
+        ${priBadge}${ownerBadge}
         ${isLocal ? '<span class="task-source">local</span>' : ''}
       </div>`;
     }).join('');
@@ -83,18 +90,8 @@ class CirceApp {
     const el = document.getElementById('calendar-list');
     if (!el) return;
 
-    // Merge Google calendar events with local schedule entries
     const todayStr = new Date().toISOString().slice(0, 10);
-    const localEvents = (this.data.schedule || []).map(e => ({
-      id: e.id,
-      title: e.event || e.title || '',
-      start: e.date ? (e.time ? `${e.date}T${e.time}` : e.date) : '',
-    }));
-    const seen = new Set((this.calendarData || []).map(e => e.id));
-    const events = [
-      ...(this.calendarData || []),
-      ...localEvents.filter(e => !seen.has(e.id) && e.start >= todayStr),
-    ];
+    const events = mergeUtils.mergeCalendar(this.calendarData, this.data.schedule, todayStr);
 
     if (events.length === 0) {
       el.innerHTML = '<div class="no-events">No upcoming events</div>';
@@ -132,25 +129,103 @@ class CirceApp {
   async refreshSidebar() {
     // Always redraw calendar from local data; only hit the server if Google is connected
     this.updateCalendarDisplay();
-    if (!this.googleToken) return;
+    const accounts = this.getAccountsPayload();
+    if (!accounts.length) return;
     try {
       const res = await fetch('/api/sidebar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ googleToken: this.googleToken }),
+        body: JSON.stringify({ googleAccounts: accounts }),
       });
       if (!res.ok) return;
       const { calendar, tasks, googleTokenExpired } = await res.json();
-      if (googleTokenExpired && this.tokenClient) {
-        this.tokenClient.requestAccessToken({ prompt: '' });
+      if (googleTokenExpired) {
+        // Silently refresh all known token clients
+        Object.values(this.tokenClients).forEach(c => c.requestAccessToken({ prompt: '' }));
         return;
       }
       if (calendar) { this.calendarData = calendar; this.updateCalendarDisplay(); }
-      if (tasks) { this.saveData({ tasks }); }
+      if (tasks) {
+        this.saveData({ tasks: mergeUtils.mergeTasks(tasks, this.data.tasks) });
+      }
     } catch (e) { console.error('Sidebar refresh error:', e); }
   }
 
   // ── Google Identity Services ─────────────────────────────────────────────
+
+  // ── Account data helpers ─────────────────────────────────────────────────
+
+  loadGoogleAccounts() {
+    let configs = [];
+    try {
+      configs = JSON.parse(localStorage.getItem('circe_google_accounts') || '[]');
+    } catch(e) {}
+
+    // Migrate legacy single-token setup (google_token in sessionStorage)
+    const legacyToken = sessionStorage.getItem('google_token');
+    if (legacyToken && configs.length === 0) {
+      configs = [{
+        label: 'Google',
+        email: null,
+        defaults: { calendar: true, tasks: true, email: true, drive: true },
+      }];
+      localStorage.setItem('circe_google_accounts', JSON.stringify(configs));
+      sessionStorage.setItem('circe_token__', legacyToken);
+      sessionStorage.removeItem('google_token');
+    }
+
+    // Merge in short-lived tokens from sessionStorage
+    return configs.map(c => ({
+      ...c,
+      token: sessionStorage.getItem(`circe_token_${c.email || '_'}`) || null,
+    }));
+  }
+
+  saveGoogleAccountConfig() {
+    // Persist only config (label, email, defaults) — tokens stay in sessionStorage
+    const configs = this.googleAccounts.map(({ label, email, defaults }) => ({ label, email, defaults }));
+    localStorage.setItem('circe_google_accounts', JSON.stringify(configs));
+  }
+
+  saveGoogleTokens() {
+    for (const a of this.googleAccounts) {
+      const key = `circe_token_${a.email || '_'}`;
+      if (a.token) {
+        sessionStorage.setItem(key, a.token);
+      } else {
+        sessionStorage.removeItem(key);
+      }
+    }
+  }
+
+  // Build the payload for server API calls — only accounts with valid tokens
+  getAccountsPayload() {
+    return this.googleAccounts
+      .filter(a => a.token)
+      .map(({ label, email, token, defaults }) => ({ label, email, token, defaults }));
+  }
+
+  // Client-side equivalent of server's getAccountToken
+  getToken(service, preferredLabel) {
+    if (!this.googleAccounts.length) return null;
+    if (preferredLabel) {
+      const match = this.googleAccounts.find(a => a.label?.toLowerCase() === preferredLabel.toLowerCase());
+      if (match?.token) return match.token;
+    }
+    const def = this.googleAccounts.find(a => a.defaults?.[service] && a.token);
+    return def?.token || this.googleAccounts.find(a => a.token)?.token || null;
+  }
+
+  getDefaultsForNewAccount() {
+    // First account gets all defaults; subsequent accounts get none (user can toggle)
+    const hasConnected = this.googleAccounts.some(a => a.token);
+    if (!hasConnected) {
+      return { calendar: true, tasks: true, email: true, drive: true };
+    }
+    return { calendar: false, tasks: false, email: false, drive: false };
+  }
+
+  // ── Google OAuth / token management ─────────────────────────────────────
 
   async initGoogle() {
     try {
@@ -158,66 +233,202 @@ class CirceApp {
       const { clientId } = await res.json();
 
       if (!clientId) {
-        this.loadConnectionStatus(false);
+        this.loadConnectionStatus();
         return;
       }
 
-      // Wait for the GIS library to load (it loads async)
+      this.clientId = clientId;
       await this.waitForGIS();
 
-      this.tokenClient = google.accounts.oauth2.initTokenClient({
-        client_id: clientId,
-        scope: [
-          'https://www.googleapis.com/auth/calendar',
-          'https://www.googleapis.com/auth/tasks',
-          'https://www.googleapis.com/auth/gmail.readonly',
-          'https://www.googleapis.com/auth/gmail.send',
-        ].join(' '),
-        callback: (response) => {
-          if (response.error) {
-            console.error('Google sign-in error:', response.error);
-            // Silent refresh failed — clear the stale token and show disconnected
-            this.googleToken = null;
-            sessionStorage.removeItem('google_token');
-            this.loadConnectionStatus(false);
-            return;
-          }
-          this.googleToken = response.access_token;
-          sessionStorage.setItem('google_token', response.access_token);
-          // Schedule a silent refresh 5 minutes before the token expires
-          clearTimeout(this.tokenRefreshTimer);
-          const refreshIn = ((response.expires_in || 3600) - 300) * 1000;
-          this.tokenRefreshTimer = setTimeout(() => {
-            this.tokenClient.requestAccessToken({ prompt: '' });
-          }, refreshIn);
-          this.loadConnectionStatus(true);
-          this.syncWithGoogle();
-          this.refreshSidebar();
-        },
-      });
+      // Create token clients for all stored accounts so they can be silently refreshed
+      for (const account of this.googleAccounts) {
+        const key = account.email || '_';
+        this.tokenClients[key] = this.createTokenClient(account.email);
+      }
 
-      if (this.googleToken) {
-        // Silently validate and refresh the stored token on every page load.
-        // The callback handles success (fresh token + timer) and failure (clears stale token).
-        this.tokenClient.requestAccessToken({ prompt: '' });
+      // Trigger silent refresh for accounts that already have tokens
+      const accountsWithTokens = this.googleAccounts.filter(a => a.token);
+      if (accountsWithTokens.length > 0) {
+        for (const account of accountsWithTokens) {
+          const key = account.email || '_';
+          this.tokenClients[key].requestAccessToken({ prompt: '' });
+        }
       } else {
-        this.loadConnectionStatus(false);
+        this.loadConnectionStatus();
       }
     } catch (e) {
       console.error('Google init error:', e);
-      this.loadConnectionStatus(false);
+      this.loadConnectionStatus();
     }
   }
 
+  createTokenClient(emailHint) {
+    const config = {
+      client_id: this.clientId,
+      scope: [
+        'https://www.googleapis.com/auth/calendar',
+        'https://www.googleapis.com/auth/tasks',
+        'https://www.googleapis.com/auth/gmail.readonly',
+        'https://www.googleapis.com/auth/gmail.send',
+        'https://www.googleapis.com/auth/drive.readonly',
+      ].join(' '),
+      callback: (response) => this.handleTokenResponse(response, emailHint),
+    };
+    if (emailHint) config.hint = emailHint;
+    return google.accounts.oauth2.initTokenClient(config);
+  }
+
+  async handleTokenResponse(response, emailHint) {
+    if (response.error) {
+      console.error('Google token error:', response.error);
+      if (emailHint) {
+        const idx = this.googleAccounts.findIndex(a => a.email === emailHint);
+        if (idx >= 0) {
+          this.googleAccounts[idx] = { ...this.googleAccounts[idx], token: null };
+          this.saveGoogleTokens();
+        }
+      }
+      this.loadConnectionStatus();
+      return;
+    }
+
+    const token = response.access_token;
+
+    // Resolve the account's email address
+    let email = emailHint;
+    if (!email) {
+      email = await this.fetchGoogleEmail(token);
+    }
+
+    const key = email || '_';
+
+    // Find existing account entry or create a new one
+    let idx = this.googleAccounts.findIndex(a => (a.email || null) === (email || null));
+    if (idx < 0) {
+      // Brand-new account being added
+      this.googleAccounts.push({
+        label: this.pendingAccountLabel || 'Google',
+        email,
+        token,
+        defaults: this.getDefaultsForNewAccount(),
+      });
+      this.pendingAccountLabel = null;
+    } else {
+      // Refresh an existing account's token
+      this.googleAccounts[idx] = {
+        ...this.googleAccounts[idx],
+        email: email || this.googleAccounts[idx].email,
+        token,
+      };
+    }
+
+    this.saveGoogleAccountConfig();
+    this.saveGoogleTokens();
+
+    // Ensure a persistent token client exists for refresh (e.g. after add-account flow)
+    if (!this.tokenClients[key]) {
+      this.tokenClients[key] = this.createTokenClient(email);
+    }
+
+    // Schedule a silent refresh 5 minutes before expiry
+    clearTimeout(this.refreshTimers[key]);
+    const refreshIn = ((response.expires_in || 3600) - 300) * 1000;
+    this.refreshTimers[key] = setTimeout(() => {
+      const client = this.tokenClients[key];
+      if (client) client.requestAccessToken({ prompt: '' });
+    }, refreshIn);
+
+    this.loadConnectionStatus();
+    this.syncWithGoogle();
+    this.refreshSidebar();
+  }
+
+  async fetchGoogleEmail(token) {
+    try {
+      const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const info = await res.json();
+      return info.email || null;
+    } catch(e) {
+      return null;
+    }
+  }
+
+  // Add a new Google account — prompts for a nickname then opens GIS consent
+  promptAddAccount() {
+    const label = prompt('Give this account a nickname — for example "Work" or "Personal":');
+    if (!label || !label.trim()) return;
+    this.addGoogleAccount(label.trim());
+  }
+
+  addGoogleAccount(label = 'Google') {
+    if (!this.clientId) {
+      alert('Google Client ID not configured. Click the setup guide link above.');
+      return;
+    }
+    this.pendingAccountLabel = label;
+    // Use select_account so the user can choose which Google account to add
+    const tempClient = google.accounts.oauth2.initTokenClient({
+      client_id: this.clientId,
+      scope: [
+        'https://www.googleapis.com/auth/calendar',
+        'https://www.googleapis.com/auth/tasks',
+        'https://www.googleapis.com/auth/gmail.readonly',
+        'https://www.googleapis.com/auth/gmail.send',
+        'https://www.googleapis.com/auth/drive.readonly',
+      ].join(' '),
+      callback: (response) => this.handleTokenResponse(response, null),
+    });
+    tempClient.requestAccessToken({ prompt: 'select_account' });
+  }
+
+  disconnectGoogleAccount(emailParam) {
+    const email = emailParam || null;
+    const account = this.googleAccounts.find(a => (a.email || null) === email);
+    if (account?.token) {
+      try { google.accounts.oauth2.revoke(account.token, () => {}); } catch(e) {}
+    }
+    const key = email || '_';
+    clearTimeout(this.refreshTimers[key]);
+    delete this.refreshTimers[key];
+    delete this.tokenClients[key];
+    sessionStorage.removeItem(`circe_token_${key}`);
+    this.googleAccounts = this.googleAccounts.filter(a => (a.email || null) !== email);
+    this.saveGoogleAccountConfig();
+    this.loadConnectionStatus();
+  }
+
+  setAccountDefault(emailParam, service, isDefault) {
+    const email = emailParam || null;
+    if (isDefault) {
+      // Only one account can be default for a given service — remove it from all others
+      this.googleAccounts = this.googleAccounts.map(a => ({
+        ...a,
+        defaults: { ...a.defaults, [service]: (a.email || null) === email },
+      }));
+    } else {
+      const idx = this.googleAccounts.findIndex(a => (a.email || null) === email);
+      if (idx >= 0) {
+        this.googleAccounts[idx] = {
+          ...this.googleAccounts[idx],
+          defaults: { ...this.googleAccounts[idx].defaults, [service]: false },
+        };
+      }
+    }
+    this.saveGoogleAccountConfig();
+    this.loadConnectionStatus();
+  }
+
   async syncWithGoogle() {
-    if (!this.googleToken) return;
+    if (!this.getToken('tasks')) return;
     // Local tasks with no googleId were created while offline
     const pending = (this.data.tasks || []).filter(t => !t.googleId && !t.done);
     try {
       const res = await fetch('/api/tasks/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ googleToken: this.googleToken, pendingTasks: pending }),
+        body: JSON.stringify({ googleAccounts: this.getAccountsPayload(), pendingTasks: pending }),
       });
       if (!res.ok) return;
       const { tasks } = await res.json();
@@ -247,21 +458,17 @@ class CirceApp {
     });
   }
 
+  // Backwards-compat: connect = add first account
   connectGoogle() {
-    if (!this.tokenClient) {
-      alert('Google Client ID not configured. Click the setup guide link above.');
-      return;
-    }
-    this.tokenClient.requestAccessToken();
+    this.promptAddAccount();
   }
 
+  // Backwards-compat: disconnect = remove all accounts
   disconnectGoogle() {
-    if (this.googleToken) {
-      google.accounts.oauth2.revoke(this.googleToken, () => {});
+    for (const account of [...this.googleAccounts]) {
+      this.disconnectGoogleAccount(account.email);
     }
-    this.googleToken = null;
-    sessionStorage.removeItem('google_token');
-    this.loadConnectionStatus(false);
+    this.loadConnectionStatus();
   }
 
   // ── Speech recognition ──────────────────────────────────────────────────────
@@ -363,9 +570,12 @@ class CirceApp {
     const btn = document.getElementById('conv-btn');
     if (btn) btn.classList.toggle('active', this.conversationMode);
     if (this.conversationMode) {
-      this.statusEl.textContent = 'Conversation mode — listening after each response';
-      if (this.state === 'standby') this.activate();
+      // Force back to standby first in case the app is stuck in another state
+      speechSynthesis.cancel();
+      this.setState('standby', 'Chat mode — listening after each response');
+      this.activate();
     } else {
+      speechSynthesis.cancel();
       this.setState('standby', "Say \"Hey Circe\" to begin");
     }
   }
@@ -376,17 +586,17 @@ class CirceApp {
     clearTimeout(this.listenTimeout);
     if (speechSynthesis.speaking) speechSynthesis.cancel();
 
-    // Handle conversation mode toggle commands client-side (no server round-trip)
+    // Handle chat mode toggle commands client-side (no server round-trip)
     const lc = text.toLowerCase().trim();
-    if (/\b(conversation mode|keep listening|stay on|chat mode)\b/.test(lc)) {
+    if (/\b(start chat mode|chat mode on|chat mode|keep listening|stay on)\b/.test(lc)) {
       this.toggleConversationMode(true);
-      const msg = 'Conversation mode on. I\'ll keep listening after each response. Say "stop" when you\'re done.';
+      const msg = 'Chat mode on. I\'ll keep listening after each response. Say "end chat mode" or "stop listening" when you\'re done.';
       this.addBubble('circe', msg);
       await this.speak(msg);
       this.toggleConversationMode(true); // re-activate after speaking
       return;
     }
-    if (this.conversationMode && /^(stop|goodbye|that'?s all|exit conversation|done listening|bye)\b/.test(lc)) {
+    if (this.conversationMode && /\b(end chat mode|stop chat mode|chat mode off|stop listening|goodbye|that'?s all|done|bye)\b/.test(lc)) {
       this.toggleConversationMode(false);
       const msg = 'Okay, going quiet. Say "Hey Circe" whenever you need me.';
       this.addBubble('circe', msg);
@@ -407,7 +617,7 @@ class CirceApp {
         body: JSON.stringify({
           messages: this.conversation,
           localData: this.data,
-          googleToken: this.googleToken,
+          googleAccounts: this.getAccountsPayload(),
           useConsultant: this.useConsultant
         })
       });
@@ -419,8 +629,8 @@ class CirceApp {
       const json = await res.json();
 
       if (json.localData) this.saveData(json.localData);
-      if (json.googleTokenExpired && this.tokenClient) {
-        this.tokenClient.requestAccessToken({ prompt: '' });
+      if (json.googleTokenExpired) {
+        Object.values(this.tokenClients).forEach(c => c.requestAccessToken({ prompt: '' }));
       }
       if (json.calendar) { this.calendarData = json.calendar; this.updateCalendarDisplay(); }
       this.conversation.push({ role: 'assistant', content: json.response });
@@ -467,7 +677,7 @@ class CirceApp {
         body: JSON.stringify({
           messages: this.conversation,
           localData: this.data,
-          googleToken: this.googleToken,
+          googleAccounts: this.getAccountsPayload(),
           useConsultant: true
         })
       });
@@ -526,17 +736,34 @@ class CirceApp {
         enVoices.find(v => v.lang === 'en-US' && v.localService);
       if (preferred) utterance.voice = preferred;
 
-      utterance.onend = () => {
-        resolve();
-        // Resume listening
+      // done() resets state and restarts recognition — called once regardless of path
+      let finished = false;
+      const done = () => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(watchdog);
+        this.setState('standby', 'Say "Hey Circe" to begin');
         try { this.recognition.start(); } catch(e) {}
-      };
-      utterance.onerror = () => {
         resolve();
-        try { this.recognition.start(); } catch(e) {}
       };
 
+      utterance.onend   = done;
+      utterance.onerror = done;
+
+      // Watchdog: Chrome sometimes silently drops utterances (autoplay policy,
+      // voices not loaded, etc.) and never fires onend/onerror — recover after
+      // a generous estimate of speaking time so the app doesn't freeze.
+      const estimatedMs = Math.max(5000, text.length * 60);
+      const watchdog = setTimeout(done, estimatedMs);
+
       speechSynthesis.speak(utterance);
+
+      // Secondary check: if the browser queued but never started within 1s, recover
+      setTimeout(() => {
+        if (!finished && !speechSynthesis.speaking && !speechSynthesis.pending) {
+          done();
+        }
+      }, 1000);
     });
   }
 
@@ -604,43 +831,72 @@ class CirceApp {
     await this.initGoogle();
   }
 
-  loadConnectionStatus(googleConnected) {
+  loadConnectionStatus() {
     const el = document.getElementById('accounts-status');
     if (!el) return;
 
     fetch('/api/connections').then(r => r.json()).then(({ google }) => {
-      const gConnected = googleConnected !== undefined ? googleConnected : !!this.googleToken;
-      const gConfigured = google.configured;
-
-      let googleHtml;
-      if (!gConfigured) {
-        googleHtml = `<div class="account-row">
+      if (!google.configured) {
+        el.innerHTML = `<div class="account-row">
           <span class="unconfigured">✗ Google</span>
           <a href="/setup-google.html">Set up</a>
         </div>`;
-      } else if (gConnected) {
-        googleHtml = `<div class="account-row">
-          <span class="connected">✓ Google</span>
-          <a href="#" onclick="app.disconnectGoogle(); return false;">Disconnect</a>
-        </div>`;
-      } else {
-        googleHtml = `<div class="account-row">
+        return;
+      }
+
+      const connectedAccounts = this.googleAccounts.filter(a => a.token);
+      const SERVICES = ['calendar', 'tasks', 'email', 'drive'];
+      const SERVICE_LABELS = { calendar: 'Cal', tasks: 'Tasks', email: 'Email', drive: 'Drive' };
+
+      let html = '';
+
+      if (connectedAccounts.length === 0) {
+        html = `<div class="account-row">
           <span class="disconnected">○ Google</span>
           <a href="#" onclick="app.connectGoogle(); return false;">Connect</a>
         </div>`;
+      } else {
+        for (const account of connectedAccounts) {
+          const displayName = account.label || 'Google';
+          const emailStr = account.email
+            ? `<div class="account-email">${this.escapeHtml(account.email)}</div>`
+            : '';
+          const emailJson = JSON.stringify(account.email || '');
+          const pills = SERVICES.map(svc => {
+            const active = account.defaults?.[svc] ? ' active' : '';
+            const nextState = !account.defaults?.[svc];
+            return `<span class="default-pill${active}"
+              onclick="app.setAccountDefault(${emailJson}, '${svc}', ${nextState}); return false;"
+              title="${account.defaults?.[svc] ? 'Default for ' + svc + ' — click to remove' : 'Click to set as default for ' + svc}"
+              >${SERVICE_LABELS[svc]}</span>`;
+          }).join('');
+
+          html += `<div class="account-card">
+            <div class="account-card-header">
+              <span class="connected">✓ ${this.escapeHtml(displayName)}</span>
+              <a href="#" onclick="app.disconnectGoogleAccount(${emailJson}); return false;">Disconnect</a>
+            </div>
+            ${emailStr}
+            <div class="account-defaults">${pills}</div>
+          </div>`;
+        }
+        html += `<div class="account-row add-account-row">
+          <a href="#" onclick="app.promptAddAccount(); return false;">+ Add account</a>
+        </div>`;
       }
 
-      el.innerHTML = googleHtml;
+      el.innerHTML = html;
     }).catch(() => {});
   }
 
-  greet() {
-    // Brief welcome when the app first loads (no voice, just UI)
-    setTimeout(() => {
-      if (this.state === 'standby') {
-        this.addBubble('circe', "Hi Duchess! I'm Circe. Say \"Hey Circe\" whenever you need me.");
-      }
-    }, 800);
+  async greet() {
+    // Wait briefly for voices to finish loading
+    await new Promise(r => setTimeout(r, 1000));
+    if (this.state !== 'standby') return;
+    const text = mergeUtils.buildStartupSpeech(this.data.tasks, this.data.schedule);
+    this.addBubble('circe', text);
+    await this.speak(text);
+    // speak() resets state to standby — ready for wake word
   }
 }
 
@@ -653,11 +909,16 @@ window.listVoices = () => {
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
-let app;
-window.addEventListener('load', () => {
-  // Voices may load async in some browsers
-  if (speechSynthesis.onvoiceschanged !== undefined) {
-    speechSynthesis.onvoiceschanged = () => {};
-  }
-  app = new CirceApp();
-});
+if (typeof module !== 'undefined' && module.exports) {
+  // Node/Jest: export class for testing (no auto-boot)
+  module.exports = { CirceApp };
+} else {
+  let app;
+  window.addEventListener('load', () => {
+    // Voices may load async in some browsers
+    if (speechSynthesis.onvoiceschanged !== undefined) {
+      speechSynthesis.onvoiceschanged = () => {};
+    }
+    app = new CirceApp();
+  });
+}

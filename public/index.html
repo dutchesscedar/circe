@@ -116,22 +116,43 @@
 
     .conv-btn {
       flex-shrink: 0;
-      background: none;
-      border: 1px solid #3a3a5a;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      background: #1a1a2e;
+      border: 2px solid #3a3a5a;
       color: #6b6b8a;
-      border-radius: 8px;
-      padding: 6px 12px;
+      border-radius: 10px;
+      padding: 7px 14px;
       cursor: pointer;
-      font-size: 0.82rem;
-      letter-spacing: 0.04em;
+      font-size: 0.88rem;
+      font-weight: 500;
+      letter-spacing: 0.02em;
       transition: all 0.2s;
     }
-    .conv-btn:hover { background: #1e1e3a; color: #c0c0e0; }
+    .conv-btn:hover { border-color: #6060a0; color: #c0c0e0; }
+    .conv-btn .conv-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #3a3a5a;
+      flex-shrink: 0;
+      transition: all 0.3s;
+    }
     .conv-btn.active {
-      background: #4c1d95;
+      background: #2d1060;
       border-color: #7c3aed;
       color: #e0d0ff;
-      box-shadow: 0 0 10px rgba(124, 58, 237, 0.3);
+      box-shadow: 0 0 14px rgba(124, 58, 237, 0.4);
+    }
+    .conv-btn.active .conv-dot {
+      background: #a855f7;
+      box-shadow: 0 0 6px rgba(168, 85, 247, 0.8);
+      animation: dot-pulse 1.5s ease-in-out infinite;
+    }
+    @keyframes dot-pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(1.3); }
     }
 
     .top-bar-settings {
@@ -306,6 +327,25 @@
       font-style: italic;
       padding: 4px 0;
     }
+    .priority-badge {
+      font-size: 0.62rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-radius: 4px;
+      padding: 1px 5px;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .priority-badge.high   { background: #7f1d1d; color: #fca5a5; }
+    .priority-badge.medium { background: #78350f; color: #fcd34d; }
+    .priority-badge.low    { background: #14532d; color: #86efac; }
+    .task-owner {
+      font-size: 0.68rem;
+      color: #7878b0;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
 
     /* Calendar */
     .cal-day {
@@ -362,6 +402,46 @@
     .account-row .unconfigured { color: #3a3a5a; }
     .account-row a { color: #7c3aed; text-decoration: none; font-size: 0.75rem; }
     .account-row a:hover { text-decoration: underline; }
+    .add-account-row { justify-content: center; padding: 4px 0; }
+
+    /* Multi-account cards */
+    .account-card {
+      background: #13132a;
+      border: 1px solid #2a2a44;
+      border-radius: 6px;
+      padding: 6px 8px;
+      margin-bottom: 6px;
+      font-size: 0.82rem;
+    }
+    .account-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 2px;
+    }
+    .account-card-header .connected { color: #4ade80; font-weight: 600; }
+    .account-card-header a { color: #7c3aed; text-decoration: none; font-size: 0.72rem; }
+    .account-card-header a:hover { text-decoration: underline; }
+    .account-email { font-size: 0.7rem; color: #6b6b8a; margin-bottom: 4px; }
+    .account-defaults { display: flex; gap: 4px; flex-wrap: wrap; }
+    .default-pill {
+      font-size: 0.65rem;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 10px;
+      background: #1e1e3a;
+      color: #5a5a7a;
+      border: 1px solid #2a2a44;
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.15s, color 0.15s;
+    }
+    .default-pill.active {
+      background: #3b1f6e;
+      color: #c4b5fd;
+      border-color: #7c3aed;
+    }
+    .default-pill:hover { border-color: #7c3aed; color: #c4b5fd; }
 
     /* Error banner */
     #error-banner {
@@ -393,7 +473,10 @@
     <div class="status-text" id="status-text">Say "Hey Circe" to begin</div>
     <div class="interim-text" id="interim-text"></div>
   </div>
-  <button class="conv-btn" id="conv-btn" onclick="app && app.toggleConversationMode()" title="Conversation mode — keep listening after each response">Chat</button>
+  <button class="conv-btn" id="conv-btn" onclick="app && app.toggleConversationMode()" title="Chat mode — keep listening after each response">
+    <span class="conv-dot"></span>
+    Chat Mode
+  </button>
   <button class="top-bar-settings" onclick="app && app.openSettings()" title="Settings">⚙</button>
 </div>
 
@@ -471,6 +554,7 @@
 </style>
 
 <script src="https://accounts.google.com/gsi/client" async></script>
+<script src="mergeUtils.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

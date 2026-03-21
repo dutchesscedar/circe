@@ -26,8 +26,10 @@ A voice-activated web app named Circe. Activated by saying "Hey Circe". Always r
 ## Features
 
 - Wake word detection ("Hey Circe")
-- Task manager, student tracker, daily schedule
-- Google Calendar / Tasks / Gmail integration (browser-based GIS OAuth)
+- Task manager (priority/owner fields, voice set-priority), student tracker, daily schedule
+- Google Calendar / Tasks / Gmail / Drive integration (browser-based GIS OAuth)
+- **Multiple Google accounts** — work + personal, each with per-service defaults (calendar/tasks/email/drive); add/disconnect/toggle defaults from the sidebar; fully backwards-compatible with single-account
+- Email body reading (`read_email` tool), web fetch + summarize (`web_fetch` tool with SSRF protection), Google Drive file search (`google_drive` tool)
 - Two-model Claude setup: fast replies + expert consultant escalation
 - Saves data to localStorage (local) and external services (when connected)
 
@@ -41,7 +43,7 @@ A voice-activated web app named Circe. Activated by saying "Hey Circe". Always r
 - `ANTHROPIC_API_KEY` lives in `.env` (gitignored)
 - Google Client ID lives in `.env` as `GOOGLE_CLIENT_ID` (gitignored)
 - Settings UI saves to `config.json` (also gitignored), which takes priority over `.env`
-- Google access token is short-lived (1 hr), stored in sessionStorage, refreshed via GIS
+- **Multi-account Google tokens:** account config (label, email, defaults) → `localStorage['circe_google_accounts']`; short-lived tokens → `sessionStorage['circe_token_<email>']`; legacy single-token key `google_token` is auto-migrated on first load
 
 ## Testing
 
@@ -51,13 +53,29 @@ A voice-activated web app named Circe. Activated by saying "Hey Circe". Always r
 - New server-side functions → test in `tests/localTools.test.js` or a new file
 - New API endpoints → test in `tests/endpoints.test.js` (use supertest)
 - New utility/encoding logic → test in a focused file like `tests/emailEncoding.test.js`
-- Run `npm test` before committing — all 34 (or more) tests must pass
+- Run `npm test` before committing — all tests must pass (currently 108)
 
 ## Architecture
 
 - `server.js` — Express server, Claude API proxy, tool execution, OAuth routes
+  - `runLocalTool(name, input, data)` — pure local tools (tasks, schedule, students); exported for testing
+  - `runExternalTool(name, input, googleAccounts)` — Google/web tools; uses `getAccountToken` to pick the right token per service
+  - `getAccountToken(accounts, service, preferredLabel)` — picks best token from multi-account array; exported for testing
+  - `resolveAccounts(body)` — normalises `{googleAccounts:[…]}` and legacy `{googleToken:'…'}` into a unified array; exported for testing
+  - `fetchExternalData(googleAccounts)` — fans out Google API calls across all connected accounts; labels results with `accountLabel`
 - `config.js` — reads config.json then falls back to .env
-- `integrations/google.js` — Google APIs using browser-issued GIS access token
+- `integrations/google.js` — Google APIs using browser-issued GIS access token; includes `getEmailBody`, `getDriveFiles`
+- `public/mergeUtils.js` — shared deduplication/merge logic (tasks, calendar, startup speech); also runs in Node for testing
 - `public/index.html` — main UI
-- `public/app.js` — frontend: voice, GIS sign-in, chat
+- `public/app.js` — frontend: voice, multi-account GIS sign-in, chat
+  - `getAccountsPayload()` — builds token array for server API calls
+  - `getToken(service, preferredLabel)` — client-side token picker
+  - `handleTokenResponse(response, emailHint)` — processes GIS callback for any account
+  - `promptAddAccount()` / `addGoogleAccount(label)` — adds a new Google account
+  - `disconnectGoogleAccount(email)` — removes a single account
+  - `setAccountDefault(email, service, isDefault)` — toggles per-service defaults
 - `public/setup-google.html` — friendly Google Client ID setup guide
+
+## Google API scopes required
+
+`calendar`, `tasks`, `gmail.readonly`, `gmail.send`, `drive.readonly` — all requested in a single GIS consent. If a user connected before `drive.readonly` was added they need to Disconnect and reconnect to pick up the new scope.
