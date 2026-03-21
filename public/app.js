@@ -488,12 +488,10 @@ class CirceApp {
       }
     };
     this.recognition.onend = () => {
-      // Restart unless we're speaking (avoid feedback loop)
-      if (this.state !== 'speaking') {
-        setTimeout(() => {
-          try { this.recognition.start(); } catch(e) {}
-        }, 200);
-      }
+      // Always restart — barge-in requires the mic to stay live during speech
+      setTimeout(() => {
+        try { this.recognition.start(); } catch(e) {}
+      }, 200);
     };
   }
 
@@ -513,9 +511,31 @@ class CirceApp {
 
     const combined = (final + interim).toLowerCase().trim();
 
+    const wakeWords = ['circe', 'surce', 'searcy', 'searsy', 'sirsy', 'percy', 'mercy', 'sir-c', 'sirc'];
+
+    if (this.state === 'speaking' && this.bargeInReady) {
+      // Barge-in: user spoke while Circe was talking
+      if (this.conversationMode) {
+        // Chat mode: any utterance interrupts and gets processed as a command
+        if (final.trim().length > 2) {
+          speechSynthesis.cancel();
+          const cleaned = final.trim().replace(/^(hey\s+)?(circe|surce|searcy|searsy|sirsy|percy|mercy|sir-c|sirc)[,.]?\s*/i, '').trim();
+          if (cleaned.length > 1) this.processCommand(cleaned);
+          else this.activate();
+        }
+      } else {
+        // Outside chat mode: only the wake word interrupts
+        if (wakeWords.some(w => combined.includes(w))) {
+          speechSynthesis.cancel();
+          this.setState('standby', 'Say "Hey Circe" to begin');
+          this.activate();
+        }
+      }
+      return;
+    }
+
     if (this.state === 'standby') {
       // Watch for wake word — include phonetic mishearings of "Circe"
-      const wakeWords = ['circe', 'surce', 'searcy', 'searsy', 'sirsy', 'percy', 'mercy', 'sir-c', 'sirc'];
       if (wakeWords.some(w => combined.includes(w))) {
         this.activate();
       }
@@ -722,8 +742,11 @@ class CirceApp {
     return new Promise((resolve) => {
       this.setState('speaking', 'Speaking…');
 
-      // Stop listening while speaking to avoid hearing our own voice
-      try { this.recognition.stop(); } catch(e) {}
+      // Grace period: don't allow barge-in for the first 600ms so the mic
+      // doesn't catch the very start of Circe's own voice and self-interrupt
+      this.bargeInReady = false;
+      clearTimeout(this._bargeInTimer);
+      this._bargeInTimer = setTimeout(() => { this.bargeInReady = true; }, 600);
 
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.rate = 0.9;
@@ -740,14 +763,15 @@ class CirceApp {
         enVoices.find(v => v.lang === 'en-US' && v.localService);
       if (preferred) utterance.voice = preferred;
 
-      // done() resets state and restarts recognition — called once regardless of path
+      // done() resets state — called once regardless of path
       let finished = false;
       const done = () => {
         if (finished) return;
         finished = true;
         clearTimeout(watchdog);
+        clearTimeout(this._bargeInTimer);
+        this.bargeInReady = false;
         this.setState('standby', 'Say "Hey Circe" to begin');
-        try { this.recognition.start(); } catch(e) {}
         resolve();
       };
 

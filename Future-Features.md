@@ -55,8 +55,11 @@ Priority (high/medium/low) and owner fields now on all tasks. Sidebar sorts by p
 ### ✅ Google Drive Access — DONE
 `google_drive` tool: list recent files or search by keyword. Returns file names + direct links. Requires `drive.readonly` OAuth scope (re-auth needed if previously connected).
 
-### Barge In support in chat mode
-is this implemented yet?
+### ✅ Barge-in support — DONE
+Voice interruption now works in both modes:
+- **Chat mode:** any spoken utterance (after a 600ms grace period) cancels TTS and processes the command
+- **Outside chat mode:** saying "Hey Circe" while Circe is speaking cancels TTS and activates listening
+- Grace period prevents Circe's own voice from triggering self-interruption
 
 ### Customizable Dashboard / Navigation
 - Rearrange sidebar panels

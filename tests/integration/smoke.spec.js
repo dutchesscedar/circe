@@ -180,6 +180,25 @@ test('Chat Mode button toggles active class', async ({ page }) => {
 
 // ── Error messages ────────────────────────────────────────────────────────────
 
+// ── Barge-in ──────────────────────────────────────────────────────────────────
+
+test('bargeInReady is false on speak() start, true after 600ms', async ({ page }) => {
+  await page.goto('/');
+  const result = await page.evaluate(async () => {
+    // Trigger speak() and sample bargeInReady before and after grace period
+    window.app.speak('Testing barge in grace period');
+    const before = window.app.bargeInReady;
+    await new Promise(r => setTimeout(r, 700));
+    const after = window.app.bargeInReady;
+    window.speechSynthesis.cancel();
+    return { before, after };
+  });
+  expect(result.before).toBe(false);
+  expect(result.after).toBe(true);
+});
+
+// ── API error messages ────────────────────────────────────────────────────────
+
 test('API error shows friendly message, not raw JSON', async ({ page }) => {
   await page.goto('/');
   // Intercept the chat API and return a 500 with a friendly error

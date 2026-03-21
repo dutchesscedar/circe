@@ -148,6 +148,83 @@ describe('speak() state transitions', () => {
   });
 });
 
+// ── Barge-in ──────────────────────────────────────────────────────────────────
+
+describe('barge-in during speak()', () => {
+  function fireResult(app, transcript, isFinal = true) {
+    const event = {
+      resultIndex: 0,
+      results: [{
+        isFinal,
+        0: { transcript },
+        length: 1,
+      }],
+    };
+    event.results.length = 1;
+    app.onSpeechResult(event);
+  }
+
+  test('bargeInReady is false immediately after speak() starts', () => {
+    const app = makeApp();
+    app.speak('Hello there');
+    expect(app.bargeInReady).toBe(false);
+  });
+
+  test('bargeInReady becomes true after 600ms grace period', () => {
+    const app = makeApp();
+    app.speak('Hello there');
+    expect(app.bargeInReady).toBe(false);
+    jest.advanceTimersByTime(600);
+    expect(app.bargeInReady).toBe(true);
+  });
+
+  test('speech during grace period does NOT interrupt (prevents self-interruption)', () => {
+    const app = makeApp();
+    app.speak('Hello');
+    // bargeInReady is still false — barge-in should be ignored
+    fireResult(app, 'stop');
+    expect(app.state).toBe('speaking');
+    expect(synth.speaking).toBe(true);
+  });
+
+  test('in chat mode, final speech after grace period cancels TTS', () => {
+    const app = makeApp();
+    app.toggleConversationMode(true);
+    app.speak('A long response');
+    jest.advanceTimersByTime(600); // grace period over
+    expect(app.bargeInReady).toBe(true);
+    fireResult(app, 'what time is it', true);
+    expect(synth.speaking).toBe(false); // TTS cancelled
+  });
+
+  test('outside chat mode, random speech does NOT cancel TTS', () => {
+    const app = makeApp();
+    app.speak('A long response');
+    jest.advanceTimersByTime(600);
+    fireResult(app, 'what time is it', true);
+    // No wake word — should not interrupt
+    expect(app.state).toBe('speaking');
+  });
+
+  test('outside chat mode, wake word cancels TTS and activates listening', () => {
+    const app = makeApp();
+    app.speak('A long response');
+    jest.advanceTimersByTime(600);
+    fireResult(app, 'hey circe what time is it', true);
+    expect(synth.speaking).toBe(false);
+    expect(app.state).toBe('listening');
+  });
+
+  test('bargeInReady resets to false when speak() finishes normally', () => {
+    const app = makeApp();
+    app.speak('Hello');
+    jest.advanceTimersByTime(600);
+    expect(app.bargeInReady).toBe(true);
+    synth.resolveAll(); // TTS ends naturally
+    expect(app.bargeInReady).toBe(false);
+  });
+});
+
 // ── activate() after speak() ─────────────────────────────────────────────────
 
 describe('activate() after speak()', () => {
