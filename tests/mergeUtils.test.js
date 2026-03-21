@@ -166,4 +166,29 @@ describe('mergeCalendar', () => {
     const result = mergeCalendar([], [local(1001, 'Doctor appt', FUTURE, '14:00')], TODAY);
     expect(result[0].start).toBe(`${FUTURE}T14:00`);
   });
+
+  test('normalises 12-hour "2:00 PM" time to 24-hour HH:MM', () => {
+    const result = mergeCalendar([], [local(1001, 'IEP meeting', FUTURE, '2:00 PM')], TODAY);
+    expect(result[0].start).toBe(`${FUTURE}T14:00`);
+  });
+
+  test('normalises "2pm" shorthand to 24-hour HH:MM', () => {
+    const result = mergeCalendar([], [local(1001, 'IEP meeting', FUTURE, '2pm')], TODAY);
+    expect(result[0].start).toBe(`${FUTURE}T14:00`);
+  });
+
+  test('normalises "9:30 AM" to 24-hour HH:MM', () => {
+    const result = mergeCalendar([], [local(1001, 'Morning check-in', FUTURE, '9:30 AM')], TODAY);
+    expect(result[0].start).toBe(`${FUTURE}T09:30`);
+  });
+
+  test('normalises "12:00 PM" (noon) correctly', () => {
+    const result = mergeCalendar([], [local(1001, 'Lunch', FUTURE, '12:00 PM')], TODAY);
+    expect(result[0].start).toBe(`${FUTURE}T12:00`);
+  });
+
+  test('normalises "12:00 AM" (midnight) to 00:00', () => {
+    const result = mergeCalendar([], [local(1001, 'Midnight', FUTURE, '12:00 AM')], TODAY);
+    expect(result[0].start).toBe(`${FUTURE}T00:00`);
+  });
 });

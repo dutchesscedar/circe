@@ -26,6 +26,7 @@ class CirceApp {
     this.taskListEl = document.getElementById('task-list');
 
     this.updateTaskDisplay();
+    this.updateCalendarDisplay();
     this.initGoogle();      // sets up GIS, then loads connection status
 
     if (!SpeechRecognition) {
@@ -654,9 +655,12 @@ class CirceApp {
 
     } catch (err) {
       console.error(err);
-      const msg = `I'm sorry, something went wrong. ${err.message || 'Please try again.'}`;
-      this.addBubble('circe', msg);
-      await this.speak(msg);
+      // err.message may be the friendly string from the server, or a network error
+      const serverMsg = err.message && !err.message.startsWith('{') && !err.message.match(/^\d{3}/)
+        ? err.message
+        : "Something went wrong. Let's try that again.";
+      this.addBubble('circe', serverMsg);
+      await this.speak(serverMsg);
     }
 
     if (this.conversationMode) {
@@ -913,12 +917,11 @@ if (typeof module !== 'undefined' && module.exports) {
   // Node/Jest: export class for testing (no auto-boot)
   module.exports = { CirceApp };
 } else {
-  let app;
   window.addEventListener('load', () => {
     // Voices may load async in some browsers
     if (speechSynthesis.onvoiceschanged !== undefined) {
       speechSynthesis.onvoiceschanged = () => {};
     }
-    app = new CirceApp();
+    window.app = new CirceApp();
   });
 }

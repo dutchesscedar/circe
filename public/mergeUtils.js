@@ -54,11 +54,26 @@ function mergeCalendar(googleEvents, localSchedule, todayStr) {
     })
   );
 
-  const localEvents = (localSchedule || []).map(e => ({
-    id:    e.id,
-    title: e.event || e.title || '',
-    start: e.date ? (e.time ? `${e.date}T${e.time}` : e.date) : '',
-  }));
+  const localEvents = (localSchedule || []).map(e => {
+    // Normalise time to HH:MM; handle 12-hour formats like "2:00 PM" or "2pm"
+    let time = e.time || '';
+    if (time) {
+      const m = time.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);
+      if (m) {
+        let h = parseInt(m[1], 10);
+        const min = m[2] || '00';
+        const ampm = (m[3] || '').toLowerCase();
+        if (ampm === 'pm' && h < 12) h += 12;
+        if (ampm === 'am' && h === 12) h = 0;
+        time = `${String(h).padStart(2, '0')}:${min}`;
+      }
+    }
+    return {
+      id:    e.id,
+      title: e.event || e.title || '',
+      start: e.date ? (time ? `${e.date}T${time}` : e.date) : '',
+    };
+  });
 
   const localOnly = localEvents.filter(e => {
     if (googleIds.has(e.id)) return false;

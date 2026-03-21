@@ -55,6 +55,9 @@ Priority (high/medium/low) and owner fields now on all tasks. Sidebar sorts by p
 ### ✅ Google Drive Access — DONE
 `google_drive` tool: list recent files or search by keyword. Returns file names + direct links. Requires `drive.readonly` OAuth scope (re-auth needed if previously connected).
 
+### Barge In support in chat mode
+is this implemented yet?
+
 ### Customizable Dashboard / Navigation
 - Rearrange sidebar panels
 - Choose which widgets appear

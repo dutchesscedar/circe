@@ -228,7 +228,7 @@ const tools = [
         action: { type: "string", enum: ["add", "list", "list_today"] },
         event: { type: "string" },
         date: { type: "string", description: "YYYY-MM-DD" },
-        time: { type: "string" },
+        time: { type: "string", description: "HH:MM in 24-hour format, e.g. 14:00" },
       },
       required: ["action"],
     },
@@ -624,7 +624,19 @@ app.post('/api/chat', async (req, res) => {
     }
   } catch(err) {
     console.error('Chat error:', err.message);
-    res.status(500).json({ error: err.message });
+    // Map known technical errors to friendly messages; never expose raw API responses to Kate
+    const status = err.status || err.statusCode || (err.response && err.response.status);
+    let friendly;
+    if (status === 529 || (err.message && err.message.includes('overloaded'))) {
+      friendly = "I'm a little overloaded right now. Give me a moment and try again.";
+    } else if (status === 429 || (err.message && err.message.includes('rate'))) {
+      friendly = "I need a quick breather. Try again in a moment.";
+    } else if (status === 401 || status === 403) {
+      friendly = "There's a problem with my connection. Ask someone to check the API key.";
+    } else {
+      friendly = "Something went wrong on my end. Let's try that again.";
+    }
+    res.status(500).json({ error: friendly });
   }
 });
 
