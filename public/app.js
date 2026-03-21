@@ -607,8 +607,17 @@ class CirceApp {
     clearTimeout(this.listenTimeout);
     if (speechSynthesis.speaking) speechSynthesis.cancel();
 
-    // Handle chat mode toggle commands client-side (no server round-trip)
+    // Handle client-side commands (no server round-trip needed)
     const lc = text.toLowerCase().trim();
+
+    if (/\b(what can you do|what do you do|how do you work|help|what are your commands|what can i say)\b/.test(lc)) {
+      const msg = 'Here\'s what I can do. For tasks, say: add a task, mark it done, what are my tasks, or set this to high priority. For your schedule, say: add an event, what\'s on my schedule, or what\'s today. For email, say: check my email, read that email, or send an email. For anything else, say: search the web for, find a file in Drive, or remind me. Say "start chat mode" to keep me listening, or "Hey Circe" any time to get my attention. And you can always say "consult your advisor" for a deeper answer.';
+      this.addBubble('circe', msg);
+      await this.speak(msg);
+      if (this.conversationMode) this.activate();
+      return;
+    }
+
     if (/\b(start chat mode|chat mode on|chat mode|keep listening|stay on)\b/.test(lc)) {
       this.toggleConversationMode(true);
       const msg = 'Chat mode on. I\'ll keep listening after each response. Say "end chat mode" or "stop listening" when you\'re done.';

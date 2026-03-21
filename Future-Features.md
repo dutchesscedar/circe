@@ -39,17 +39,23 @@ Claude reads this file and considers outstanding requests when answering current
 
 These fit naturally into Circe's existing browser + Claude + Google APIs stack.
 
-### Email Management (Expand Gmail)
-- Categorize inbox by subject/sender automatically
-- Flag and surface important emails verbally ("You have 3 unread messages, one looks urgent")
-- Summarize email threads on request
+### ✅ Email Management — Urgent Flagging DONE
 - Read full email body ✅ done via `read_email` tool
-- **Design note:** Categorization/flagging needs a Claude-powered layer on top of `getRecentEmails`
+- ✅ Urgent emails flagged in system prompt (subject keywords: urgent, deadline, ASAP, etc.); Circe proactively mentions them
+- Categorize full inbox by subject/sender automatically — still pending
+- Summarize email threads on request — still pending (chains multiple `read_email` calls)
 
-### Task Completion Reports
-- When a task is marked done, generate a summary of what was accomplished and the date completed
-- Maintain a completed-task log that can be reviewed on demand ("Circe, what did I finish this week?")
-- **Design note:** Extend task schema with `completedAt` timestamp + `summary` field; Claude generates the TLDR at completion time; store in localStorage
+### ✅ Task Completion Reports — DONE
+- `completedAt` timestamp and optional `summary` field added to task schema
+- `list_completed` action added — say "what did I finish this week?" to review
+- Circe generates a brief summary note at completion time
+- Recently completed tasks shown in Claude's context so it remembers what was done
+
+### ✅ Smart Suggestions / Simplify Workflows — DONE
+Baked into system prompt: Circe proactively offers one-sentence simplification tips after completing requests.
+
+### ✅ Natural Language Command Vocabulary — DONE
+"What can you do?" (and "help", "how do you work") triggers a client-side spoken cheat-sheet of commands. No server round-trip needed.
 
 ### Deadline Reminders & Time Estimates
 - Proactive reminders of upcoming deadlines (verbal + sidebar)
@@ -121,7 +127,8 @@ Flag these as "Phase 2 — Desktop Agent" before any work begins.
 ### Voice Command Task Execution (in-document editing)
 - "Circe, dictate" / "Make bold" / "Change font" / "Indent" / "Bullets" / "Find and replace" / "Suggest revisions"
 - **Why blocked:** Requires programmatic control of Word, Google Docs, etc. Not accessible from a browser sandbox.
-- **Path forward:** Electron app + OS accessibility APIs, or Claude Computer Use API
+- **Jasper's question — what if Google Docs is open in the browser?** Still blocked unfortunately. Even if Google Docs is in another tab, Circe's tab cannot read or write to a different tab's DOM — browsers isolate tabs for security. The only path is a Chrome extension (which CAN inject into any tab). That's a separate build but not as big as Electron. Flag for future planning.
+- **Path forward (near-term):** Chrome extension that injects a listener into Google Docs tabs — feasible, design needed. Electron + OS accessibility APIs also works for desktop Word.
 
 ### Open Programs, Websites, Documents by Voice
 - "Open Chrome" / "Open Word" / "Open my lesson plan"

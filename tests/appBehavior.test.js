@@ -343,3 +343,39 @@ describe('buildStartupSpeech', () => {
     expect(() => buildStartupSpeech(null, null, TODAY)).not.toThrow();
   });
 });
+
+// ── "What can you do?" client-side handler ────────────────────────────────────
+
+describe('"what can you do" command', () => {
+  test('responds without hitting the chat API', async () => {
+    const app = makeApp();
+    const p = app.processCommand('what can you do');
+    synth.resolveAll(); // speak() only resolves when utterance ends
+    await p;
+    const chatCalls = global.fetch.mock.calls.filter(c => c[0] === '/api/chat');
+    expect(chatCalls).toHaveLength(0);
+  });
+
+  test('adds a Circe bubble with help content', async () => {
+    const app = makeApp();
+    const p = app.processCommand('what can you do');
+    synth.resolveAll();
+    await p;
+    const conv = document.getElementById('conversation');
+    expect(conv.textContent).toContain('task');
+    expect(conv.textContent).toContain('schedule');
+  });
+
+  test('also matches "help" and "how do you work"', async () => {
+    for (const phrase of ['help', 'how do you work', 'what are your commands']) {
+      jest.resetModules();
+      const { CirceApp } = require('../public/app');
+      const a = new CirceApp();
+      const p = a.processCommand(phrase);
+      synth.resolveAll();
+      await p;
+      const chatCalls = global.fetch.mock.calls.filter(c => c[0] === '/api/chat');
+      expect(chatCalls).toHaveLength(0);
+    }
+  });
+});

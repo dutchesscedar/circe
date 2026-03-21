@@ -162,8 +162,20 @@ function buildSystemPrompt(localData, external) {
       }).join('\n')
     : '  None';
 
+  const recentlyCompleted = (localData.tasks || []).filter(t => t.done && t.completedAt).slice(-5).reverse();
+  const completedList = recentlyCompleted.length > 0
+    ? recentlyCompleted.map(t => {
+        const when = new Date(t.completedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        return `  - ${t.title} (${when}${t.summary ? ': ' + t.summary : ''})`;
+      }).join('\n')
+    : '  None';
+
+  const urgentKeywords = /urgent|asap|important|critical|deadline|overdue|immediately|response needed/i;
   const emailList = external.emails.length > 0
-    ? external.emails.slice(0, 5).map(e => `  - From: ${e.from} | ${e.subject}`).join('\n')
+    ? external.emails.slice(0, 5).map(e => {
+        const flag = urgentKeywords.test(e.subject) ? ' ⚑ URGENT' : '';
+        return `  - From: ${e.from} | ${e.subject}${flag}`;
+      }).join('\n')
     : '  None';
 
   const todayList = todayEvents.length > 0
@@ -187,6 +199,7 @@ Guidelines:
 - Local time zone: ${timeZone}
 - When creating calendar events, use ISO 8601 format and assume the local time zone unless told otherwise
 - ${connections}
+- Proactively simplify: if you notice a faster or easier way to do what Duchess is asking, mention it briefly after completing her request. Keep it to one sentence. Never lecture or overwhelm — just a gentle "by the way" when it's genuinely useful.
 
 UPCOMING CALENDAR (next 7 days):
 ${calList}
@@ -197,8 +210,12 @@ ${todayList}
 PENDING TASKS (${showTasks.length}):
 ${taskList}
 
+RECENTLY COMPLETED TASKS (last 5):
+${completedList}
+
 RECENT UNREAD EMAILS:
-${emailList}`;
+${emailList}
+- If any email is marked ⚑ URGENT, mention it proactively at the start of your response if Duchess hasn't asked about it yet.`;
 }
 
 // ── Tools ─────────────────────────────────────────────────────────────────────
@@ -210,11 +227,12 @@ const tools = [
     input_schema: {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["add", "complete", "delete", "list", "set_priority"] },
+        action: { type: "string", enum: ["add", "complete", "delete", "list", "set_priority", "list_completed"] },
         task: { type: "string", description: "Task title (required for add)" },
         task_id: { type: "number", description: "Task ID (required for complete, delete, set_priority)" },
         priority: { type: "string", enum: ["high", "medium", "low"], description: "Priority level" },
         owner: { type: "string", description: "Person responsible for this task (optional)" },
+        summary: { type: "string", description: "Brief note on what was done — recorded when completing a task (optional)" },
       },
       required: ["action"],
     },
@@ -380,8 +398,22 @@ function runLocalTool(name, input, localData) {
     }
     if (input.action === 'complete') {
       const t = tasks.find(t => t.id === input.task_id);
-      if (t) { t.done = true; return { result: `Done: "${t.title}"`, tasks }; }
+      if (t) {
+        t.done = true;
+        t.completedAt = new Date().toISOString();
+        if (input.summary) t.summary = input.summary;
+        return { result: `Done: "${t.title}"`, tasks };
+      }
       return { result: 'Task not found', tasks };
+    }
+    if (input.action === 'list_completed') {
+      const done = tasks.filter(t => t.done).slice(-10).reverse();
+      if (done.length === 0) return { result: 'No completed tasks yet', tasks };
+      const lines = done.map(t => {
+        const when = t.completedAt ? new Date(t.completedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'unknown date';
+        return `${t.title} (done ${when}${t.summary ? ': ' + t.summary : ''})`;
+      });
+      return { result: lines.join('; '), tasks };
     }
     if (input.action === 'delete') {
       const i = tasks.findIndex(t => t.id === input.task_id);

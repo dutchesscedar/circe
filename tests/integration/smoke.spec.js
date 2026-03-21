@@ -180,6 +180,22 @@ test('Chat Mode button toggles active class', async ({ page }) => {
 
 // ── Error messages ────────────────────────────────────────────────────────────
 
+// ── "What can you do?" ───────────────────────────────────────────────────────
+
+test('"what can you do" responds without a server round-trip', async ({ page }) => {
+  await page.goto('/');
+  await page.waitForSelector('.message.circe', { timeout: 5000 }); // wait for greeting
+  // Intercept /api/chat to detect if it gets called
+  let chatHit = false;
+  await page.route('/api/chat', route => { chatHit = true; route.continue(); });
+  await send(page, 'what can you do');
+  // Wait for a second Circe bubble (first is the greeting, second is the help response)
+  await page.waitForFunction(() => document.querySelectorAll('.message.circe').length >= 2, { timeout: 5000 });
+  expect(chatHit).toBe(false);
+  const reply = await page.locator('.message.circe').last().textContent();
+  expect(reply?.toLowerCase()).toContain('task');
+});
+
 // ── Barge-in ──────────────────────────────────────────────────────────────────
 
 test('bargeInReady is false on speak() start, true after 600ms', async ({ page }) => {

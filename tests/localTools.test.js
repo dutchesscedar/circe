@@ -263,3 +263,52 @@ describe('local_task: list sorts by priority', () => {
     expect(result).toContain('owner: Kate');
   });
 });
+
+describe('local_task: complete with summary', () => {
+  test('sets completedAt timestamp when completing a task', () => {
+    const data = { ...empty(), tasks: [{ id: 1, title: 'Write report', done: false }] };
+    const { tasks } = runLocalTool('local_task', { action: 'complete', task_id: 1 }, data);
+    expect(tasks[0].done).toBe(true);
+    expect(tasks[0].completedAt).toBeDefined();
+    expect(new Date(tasks[0].completedAt).getFullYear()).toBeGreaterThan(2020);
+  });
+
+  test('stores optional summary when provided', () => {
+    const data = { ...empty(), tasks: [{ id: 1, title: 'Write report', done: false }] };
+    const { tasks } = runLocalTool('local_task', { action: 'complete', task_id: 1, summary: 'Finished draft' }, data);
+    expect(tasks[0].summary).toBe('Finished draft');
+  });
+
+  test('completedAt is not set if task not found', () => {
+    const { result } = runLocalTool('local_task', { action: 'complete', task_id: 999 }, empty());
+    expect(result).toBe('Task not found');
+  });
+});
+
+describe('local_task: list_completed', () => {
+  test('returns recently completed tasks newest-first', () => {
+    const data = {
+      ...empty(),
+      tasks: [
+        { id: 1, title: 'Old task', done: true, completedAt: '2026-01-01T10:00:00Z' },
+        { id: 2, title: 'Recent task', done: true, completedAt: '2026-03-20T10:00:00Z' },
+      ],
+    };
+    const { result } = runLocalTool('local_task', { action: 'list_completed' }, data);
+    expect(result.indexOf('Recent task')).toBeLessThan(result.indexOf('Old task'));
+  });
+
+  test('includes summary in output when present', () => {
+    const data = {
+      ...empty(),
+      tasks: [{ id: 1, title: 'Lesson plan', done: true, completedAt: '2026-03-20T10:00:00Z', summary: 'Unit 4 draft' }],
+    };
+    const { result } = runLocalTool('local_task', { action: 'list_completed' }, data);
+    expect(result).toContain('Unit 4 draft');
+  });
+
+  test('returns message when no completed tasks', () => {
+    const { result } = runLocalTool('local_task', { action: 'list_completed' }, empty());
+    expect(result).toBe('No completed tasks yet');
+  });
+});
