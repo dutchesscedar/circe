@@ -16,6 +16,7 @@ class CirceApp {
     this.tokenRefreshTimer = null;
 
     this.calendarData = [];    // latest calendar events from server
+    this.conversationMode = false; // when on, Circe re-listens after each response
 
     this.statusEl = document.getElementById('status-text');
     this.interimEl = document.getElementById('interim-text');
@@ -343,6 +344,12 @@ class CirceApp {
   }
 
   handleOrbClick() {
+    if (this.conversationMode) {
+      // Clicking orb exits conversation mode
+      speechSynthesis.cancel();
+      this.toggleConversationMode(false);
+      return;
+    }
     if (this.state === 'standby') {
       this.activate();
     } else if (this.state === 'speaking') {
@@ -351,12 +358,42 @@ class CirceApp {
     }
   }
 
+  toggleConversationMode(force) {
+    this.conversationMode = (force !== undefined) ? force : !this.conversationMode;
+    const btn = document.getElementById('conv-btn');
+    if (btn) btn.classList.toggle('active', this.conversationMode);
+    if (this.conversationMode) {
+      this.statusEl.textContent = 'Conversation mode — listening after each response';
+      if (this.state === 'standby') this.activate();
+    } else {
+      this.setState('standby', "Say \"Hey Circe\" to begin");
+    }
+  }
+
   // ── Chat ────────────────────────────────────────────────────────────────────
 
   async processCommand(text) {
     clearTimeout(this.listenTimeout);
-    // Interrupt any ongoing speech before processing the new command
     if (speechSynthesis.speaking) speechSynthesis.cancel();
+
+    // Handle conversation mode toggle commands client-side (no server round-trip)
+    const lc = text.toLowerCase().trim();
+    if (/\b(conversation mode|keep listening|stay on|chat mode)\b/.test(lc)) {
+      this.toggleConversationMode(true);
+      const msg = 'Conversation mode on. I\'ll keep listening after each response. Say "stop" when you\'re done.';
+      this.addBubble('circe', msg);
+      await this.speak(msg);
+      this.toggleConversationMode(true); // re-activate after speaking
+      return;
+    }
+    if (this.conversationMode && /^(stop|goodbye|that'?s all|exit conversation|done listening|bye)\b/.test(lc)) {
+      this.toggleConversationMode(false);
+      const msg = 'Okay, going quiet. Say "Hey Circe" whenever you need me.';
+      this.addBubble('circe', msg);
+      await this.speak(msg);
+      return;
+    }
+
     this.setState('processing', 'Thinking…');
     this.interimEl.textContent = '';
     this.addBubble('user', text);
@@ -403,7 +440,6 @@ class CirceApp {
 
       this.addBubble('circe', json.response);
       await this.speak(json.response);
-      // Refresh sidebar after each turn so newly created tasks/events appear
       this.refreshSidebar();
 
     } catch (err) {
@@ -413,7 +449,11 @@ class CirceApp {
       await this.speak(msg);
     }
 
-    this.setState('standby', "Say \"Hey Circe\" to begin");
+    if (this.conversationMode) {
+      this.activate();
+    } else {
+      this.setState('standby', "Say \"Hey Circe\" to begin");
+    }
   }
 
   async reprocessLastWithConsultant() {
@@ -444,7 +484,11 @@ class CirceApp {
       await this.speak(msg);
     }
 
-    this.setState('standby', "Say \"Hey Circe\" to begin");
+    if (this.conversationMode) {
+      this.activate();
+    } else {
+      this.setState('standby', "Say \"Hey Circe\" to begin");
+    }
   }
 
   // ── Text input fallback ─────────────────────────────────────────────────────

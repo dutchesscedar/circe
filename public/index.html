@@ -114,6 +114,26 @@
     body.processing .status-text { color: #fcd34d; }
     body.speaking .status-text   { color: #c084fc; }
 
+    .conv-btn {
+      flex-shrink: 0;
+      background: none;
+      border: 1px solid #3a3a5a;
+      color: #6b6b8a;
+      border-radius: 8px;
+      padding: 6px 12px;
+      cursor: pointer;
+      font-size: 0.82rem;
+      letter-spacing: 0.04em;
+      transition: all 0.2s;
+    }
+    .conv-btn:hover { background: #1e1e3a; color: #c0c0e0; }
+    .conv-btn.active {
+      background: #4c1d95;
+      border-color: #7c3aed;
+      color: #e0d0ff;
+      box-shadow: 0 0 10px rgba(124, 58, 237, 0.3);
+    }
+
     .top-bar-settings {
       flex-shrink: 0;
       background: none;
@@ -373,6 +393,7 @@
     <div class="status-text" id="status-text">Say "Hey Circe" to begin</div>
     <div class="interim-text" id="interim-text"></div>
   </div>
+  <button class="conv-btn" id="conv-btn" onclick="app && app.toggleConversationMode()" title="Conversation mode — keep listening after each response">Chat</button>
   <button class="top-bar-settings" onclick="app && app.openSettings()" title="Settings">⚙</button>
 </div>
 
