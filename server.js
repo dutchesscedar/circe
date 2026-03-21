@@ -200,6 +200,7 @@ Guidelines:
 - When creating calendar events, use ISO 8601 format and assume the local time zone unless told otherwise
 - ${connections}
 - Proactively simplify: if you notice a faster or easier way to do what Duchess is asking, mention it briefly after completing her request. Keep it to one sentence. Never lecture or overwhelm — just a gentle "by the way" when it's genuinely useful.
+- Incomplete thoughts: if Duchess's message trails off, is ambiguous, or seems unfinished (e.g. "can you remind me about..." or "I need to..." with no clear target), use the suggest_completions tool. Offer 2–4 short specific options. Do not guess and execute blindly. After presenting options, say "Just say the number when you're ready."
 
 UPCOMING CALENDAR (next 7 days):
 ${calList}
@@ -367,6 +368,22 @@ const tools = [
         account: { type: "string", description: "Account label to use. Omit to use the default." },
       },
       required: ["action"],
+    },
+  },
+  {
+    name: "suggest_completions",
+    description: "Use when Duchess's input seems incomplete, trails off, or could mean several different things. Offer 2–4 short, specific options for what she might have meant. Do not guess and execute — always ask first when genuinely unsure.",
+    input_schema: {
+      type: "object",
+      properties: {
+        partial: { type: "string", description: "The incomplete or ambiguous input as received" },
+        options: {
+          type: "array",
+          items: { type: "string" },
+          description: "2–4 short, specific completions of what Duchess might have meant — phrased as full actions (e.g. 'Add a task to grade IEP papers')",
+        },
+      },
+      required: ["partial", "options"],
     },
   },
 ];
@@ -614,6 +631,8 @@ app.post('/api/chat', async (req, res) => {
       schedule: localData.schedule || [],
     };
 
+    let pendingCompletions = null; // set if suggest_completions tool is called
+
     let iterations = 0;
     while (true) {
       if (++iterations > 10) {
@@ -634,7 +653,10 @@ app.post('/api/chat', async (req, res) => {
         const results = [];
         for (const tb of toolBlocks) {
           let resultText;
-          if (['local_task', 'local_schedule', 'local_student_notes'].includes(tb.name)) {
+          if (tb.name === 'suggest_completions') {
+            pendingCompletions = tb.input.options || [];
+            resultText = `Options presented to Duchess: ${pendingCompletions.map((o, i) => `${i + 1}. ${o}`).join(' ')}`;
+          } else if (['local_task', 'local_schedule', 'local_student_notes'].includes(tb.name)) {
             const outcome = runLocalTool(tb.name, tb.input, updatedLocalData);
             if (outcome.tasks) updatedLocalData.tasks = outcome.tasks;
             if (outcome.students) updatedLocalData.students = outcome.students;
@@ -652,7 +674,7 @@ app.post('/api/chat', async (req, res) => {
       const text = response.content.find(b => b.type === 'text')?.text || "I'm not sure what to say.";
       const needsConsultant = !useConsultant && text.includes('advisor');
 
-      return res.json({ response: text, localData: updatedLocalData, needsConsultant, model, googleTokenExpired: !!external.googleAuthError, calendar: external.calendar, emails: external.emails });
+      return res.json({ response: text, localData: updatedLocalData, needsConsultant, model, googleTokenExpired: !!external.googleAuthError, calendar: external.calendar, emails: external.emails, completions: pendingCompletions });
     }
   } catch(err) {
     console.error('Chat error:', err.message);
@@ -682,4 +704,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { app, runLocalTool, buildSystemPrompt, getAccountToken, resolveAccounts };
+module.exports = { app, runLocalTool, buildSystemPrompt, getAccountToken, resolveAccounts, tools };

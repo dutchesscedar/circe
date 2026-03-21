@@ -87,3 +87,24 @@ describe('POST /api/chat', () => {
     expect(res.status).toBe(413);
   });
 });
+
+// ── suggest_completions tool definition ───────────────────────────────────────
+
+describe('suggest_completions tool definition', () => {
+  const { tools } = require('../server');
+
+  test('tool exists in tools array', () => {
+    expect(tools.find(t => t.name === 'suggest_completions')).toBeDefined();
+  });
+
+  test('requires partial and options', () => {
+    const tool = tools.find(t => t.name === 'suggest_completions');
+    expect(tool.input_schema.required).toContain('partial');
+    expect(tool.input_schema.required).toContain('options');
+  });
+
+  test('options is an array type', () => {
+    const tool = tools.find(t => t.name === 'suggest_completions');
+    expect(tool.input_schema.properties.options.type).toBe('array');
+  });
+});

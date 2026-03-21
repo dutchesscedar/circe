@@ -229,6 +229,31 @@
     .message.user .speaker  { color: #7878b0; }
     .message.circe .speaker { color: #a855f7; }
 
+    /* Completion picker */
+    .completion-picker {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 8px 16px 12px;
+      max-width: 560px;
+    }
+    .completion-btn {
+      background: #1a1a2e;
+      border: 1.5px solid #4a4a7a;
+      border-radius: 10px;
+      color: #d0d0f0;
+      font-size: 1rem;
+      padding: 10px 16px;
+      text-align: left;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .completion-btn:hover, .completion-btn:focus {
+      border-color: #a855f7;
+      background: #2a1a3e;
+      outline: none;
+    }
+
     /* Manual input */
     .input-row {
       display: flex;

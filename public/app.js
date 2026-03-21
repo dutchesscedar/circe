@@ -19,6 +19,7 @@ class CirceApp {
 
     this.calendarData = [];    // latest calendar events from server
     this.conversationMode = false; // when on, Circe re-listens after each response
+    this.pendingCompletions = []; // options shown to Duchess; next number/word selects one
 
     this.statusEl = document.getElementById('status-text');
     this.interimEl = document.getElementById('interim-text');
@@ -618,6 +619,23 @@ class CirceApp {
       return;
     }
 
+    // If completions are pending, intercept number/word selection
+    if (this.pendingCompletions.length > 0) {
+      const pick = lc.match(/^(one|two|three|four|1|2|3|4)\b/);
+      const idx = pick ? ['one','1','two','2','three','3','four','4'].indexOf(pick[0]) : -1;
+      const choiceIdx = idx >= 0 ? Math.floor(idx / 2) : -1;
+      if (choiceIdx >= 0 && choiceIdx < this.pendingCompletions.length) {
+        const chosen = this.pendingCompletions[choiceIdx];
+        this.pendingCompletions = [];
+        document.querySelectorAll('.completion-picker').forEach(el => el.remove());
+        await this.processCommand(chosen);
+        return;
+      }
+      // If they said something that isn't a number, clear completions and proceed normally
+      this.pendingCompletions = [];
+      document.querySelectorAll('.completion-picker').forEach(el => el.remove());
+    }
+
     if (/\b(start chat mode|chat mode on|chat mode|keep listening|stay on)\b/.test(lc)) {
       this.toggleConversationMode(true);
       const msg = 'Chat mode on. I\'ll keep listening after each response. Say "end chat mode" or "stop listening" when you\'re done.';
@@ -679,6 +697,13 @@ class CirceApp {
       this.useConsultant = false;
 
       this.addBubble('circe', json.response);
+
+      // If Circe is offering completions, show a numbered picker and store state
+      if (json.completions && json.completions.length > 0) {
+        this.pendingCompletions = json.completions;
+        this.addCompletionPicker(json.completions);
+      }
+
       await this.speak(json.response);
       this.refreshSidebar();
 
@@ -818,6 +843,25 @@ class CirceApp {
     div.innerHTML = `<div class="speaker">${who === 'user' ? 'You' : '✦ Circe'}</div>${this.escapeHtml(text)}`;
     this.convEl.appendChild(div);
     // Use rAF so the element is in the layout before we scroll
+    requestAnimationFrame(() => div.scrollIntoView({ behavior: 'smooth', block: 'end' }));
+  }
+
+  addCompletionPicker(options) {
+    const div = document.createElement('div');
+    div.className = 'completion-picker';
+    const labels = ['1', '2', '3', '4'];
+    div.innerHTML = options.map((opt, i) =>
+      `<button class="completion-btn" data-index="${i}">${labels[i]}. ${this.escapeHtml(opt)}</button>`
+    ).join('');
+    this.convEl.appendChild(div);
+    div.querySelectorAll('.completion-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.dataset.index, 10);
+        this.pendingCompletions = [];
+        document.querySelectorAll('.completion-picker').forEach(el => el.remove());
+        this.processCommand(options[idx]);
+      });
+    });
     requestAnimationFrame(() => div.scrollIntoView({ behavior: 'smooth', block: 'end' }));
   }
 

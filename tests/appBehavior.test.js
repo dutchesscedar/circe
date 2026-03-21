@@ -379,3 +379,68 @@ describe('"what can you do" command', () => {
     }
   });
 });
+
+// ── Completion picker ─────────────────────────────────────────────────────────
+
+describe('completion picker — number/word intercept', () => {
+  // Use a fetch that never resolves so we don't have to handle TTS in these tests
+  function hangingFetch() {
+    let sentContent = null;
+    global.fetch = jest.fn().mockImplementation((url, opts) => {
+      if (url === '/api/chat') sentContent = JSON.parse(opts.body).messages.at(-1).content;
+      return new Promise(() => {}); // never resolves
+    });
+    return () => sentContent;
+  }
+
+  test('starts with no pending completions', () => {
+    const app = makeApp();
+    expect(app.pendingCompletions).toEqual([]);
+  });
+
+  test('"one" routes to first completion', async () => {
+    const app = makeApp();
+    app.pendingCompletions = ['Add a task: grade papers', 'Schedule an IEP meeting'];
+    const getSent = hangingFetch();
+    app.processCommand('one');
+    await Promise.resolve(); await Promise.resolve(); // flush microtasks to reach fetch
+    expect(getSent()).toBe('Add a task: grade papers');
+  });
+
+  test('"two" routes to second completion', async () => {
+    const app = makeApp();
+    app.pendingCompletions = ['Option A', 'Option B', 'Option C'];
+    const getSent = hangingFetch();
+    app.processCommand('two');
+    await Promise.resolve(); await Promise.resolve();
+    expect(getSent()).toBe('Option B');
+  });
+
+  test('"2" (digit) also selects second option', async () => {
+    const app = makeApp();
+    app.pendingCompletions = ['Option A', 'Option B'];
+    const getSent = hangingFetch();
+    app.processCommand('2');
+    await Promise.resolve(); await Promise.resolve();
+    expect(getSent()).toBe('Option B');
+  });
+
+  test('completions cleared immediately on selection', () => {
+    const app = makeApp();
+    app.pendingCompletions = ['Option A', 'Option B'];
+    hangingFetch();
+    app.processCommand('one');
+    // cleared synchronously before the inner processCommand runs
+    expect(app.pendingCompletions).toEqual([]);
+  });
+
+  test('non-number clears completions and sends the literal message', async () => {
+    const app = makeApp();
+    app.pendingCompletions = ['Option A', 'Option B'];
+    const getSent = hangingFetch();
+    app.processCommand('actually never mind');
+    await Promise.resolve(); await Promise.resolve();
+    expect(app.pendingCompletions).toEqual([]);
+    expect(getSent()).toBe('actually never mind');
+  });
+});
