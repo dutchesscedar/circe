@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "test": "jest --testEnvironment node",
-    "test:integration": "playwright test"
+    "test:integration": "playwright test",
+    "check-data": "node scripts/checkData.js"
   },
   "jest": {
     "testPathIgnorePatterns": ["/node_modules/", "/tests/integration/"]

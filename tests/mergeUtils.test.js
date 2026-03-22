@@ -1,12 +1,14 @@
 'use strict';
 
 const { mergeTasks, mergeCalendar } = require('../public/mergeUtils');
+const fixtures = require('./fixtures/google');
 
 // ── mergeTasks ────────────────────────────────────────────────────────────────
 
 describe('mergeTasks', () => {
-  const googleTask = (id, title) => ({ id, title, source: 'google', done: false });
-  const localTask  = (id, title) => ({ id, title, googleId: null, done: false });
+  // Use fixture factories so tests always match the real Google API response shape
+  const googleTask = (id, title) => fixtures.googleTask({ id, title });
+  const localTask  = (id, title) => fixtures.localTask({ id, title });
 
   test('returns google tasks when no local tasks', () => {
     const result = mergeTasks([googleTask('g1', 'Buy milk')], []);
