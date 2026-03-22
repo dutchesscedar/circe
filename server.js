@@ -40,6 +40,34 @@ function resolveAccounts(body) {
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+// ── Memory + history persistence ──────────────────────────────────────────────
+
+const MEMORIES_FILE = path.join(__dirname, 'memories.json');
+const HISTORY_FILE  = path.join(__dirname, 'chat_history.json');
+
+function loadMemories() {
+  try { return JSON.parse(fs.readFileSync(MEMORIES_FILE, 'utf8')); }
+  catch { return []; }
+}
+
+function saveMemories(memories) {
+  fs.writeFileSync(MEMORIES_FILE, JSON.stringify(memories, null, 2));
+}
+
+function loadHistory() {
+  try { return JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8')); }
+  catch { return []; }
+}
+
+function appendHistory(userText, assistantText) {
+  const history = loadHistory();
+  history.push(
+    { role: 'user',      content: userText,      ts: new Date().toISOString() },
+    { role: 'assistant', content: assistantText, ts: new Date().toISOString() },
+  );
+  fs.writeFileSync(HISTORY_FILE, JSON.stringify(history.slice(-40), null, 2));
+}
+
 // ── Settings API (stored in config.json, gitignored) ─────────────────────────
 
 app.get('/api/settings', (req, res) => {
@@ -59,6 +87,34 @@ app.post('/api/settings', (req, res) => {
   }
   config.save(update);
   res.json({ ok: true });
+});
+
+// ── Memories API ─────────────────────────────────────────────────────────────
+
+app.get('/api/memories', (req, res) => {
+  res.json(loadMemories());
+});
+
+app.post('/api/memories', (req, res) => {
+  const text = (req.body.text || '').trim();
+  if (!text) return res.status(400).json({ error: 'text required' });
+  const memories = loadMemories();
+  const mem = { id: `m_${Date.now()}`, text, created: new Date().toISOString() };
+  memories.push(mem);
+  saveMemories(memories);
+  res.json(mem);
+});
+
+app.delete('/api/memories/:id', (req, res) => {
+  saveMemories(loadMemories().filter(m => m.id !== req.params.id));
+  res.json({ ok: true });
+});
+
+// ── Chat history API ──────────────────────────────────────────────────────────
+
+app.get('/api/chat-history', (req, res) => {
+  // Return last 20 turns (10 exchanges) for context restoration
+  res.json(loadHistory().slice(-20));
 });
 
 // ── TTS (macOS say) ───────────────────────────────────────────────────────────
@@ -189,7 +245,7 @@ async function fetchExternalData(googleAccounts) {
 
 // ── System prompt ─────────────────────────────────────────────────────────────
 
-function buildSystemPrompt(localData, external) {
+function buildSystemPrompt(localData, external, memories = []) {
   const now = new Date();
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const today = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone });
@@ -262,6 +318,13 @@ Guidelines:
 - Proactively simplify: if you notice a faster or easier way to do what Duchess is asking, mention it briefly after completing her request. Keep it to one sentence. Never lecture or overwhelm — just a gentle "by the way" when it's genuinely useful.
 - Incomplete thoughts: if Duchess's message trails off, is ambiguous, or seems unfinished (e.g. "can you remind me about..." or "I need to..." with no clear target), use the suggest_completions tool. Offer 2–4 short specific options. Do not guess and execute blindly. After presenting options, say "Just say the number when you're ready."
 
+STUDENT PRIVACY (FERPA):
+- Never repeat student full names back in your spoken response — use initials or role descriptions only (e.g. "your student J.D." or "that student")
+- Never repeat IEP details, disability classifications, behavioral incident notes, or assessment results verbatim — summarize only
+- If Duchess mentions a student by full name, gently acknowledge the request without repeating the name aloud, and remind her once: "Just so you know, I'll use initials to keep things private."
+- Do not store, log, or elaborate on protected student records beyond what is needed to complete the immediate task
+- These protections apply even when Duchess is the one who shared the information
+
 UPCOMING CALENDAR (next 7 days):
 ${calList}
 
@@ -276,7 +339,13 @@ ${completedList}
 
 RECENT UNREAD EMAILS:
 ${emailList}
-- If any email is marked ⚑ URGENT, mention it proactively at the start of your response if Duchess hasn't asked about it yet.`;
+- If any email is marked ⚑ URGENT, mention it proactively at the start of your response if Duchess hasn't asked about it yet.
+
+THINGS I REMEMBER ABOUT DUCHESS:
+${memories.length > 0
+  ? memories.map(m => `- ${m.text}`).join('\n')
+  : '- Nothing saved yet — memories will build up as we talk.'}
+- Use these naturally in conversation when relevant. Never recite the whole list unprompted.`;
 }
 
 // ── Tools ─────────────────────────────────────────────────────────────────────
@@ -444,6 +513,18 @@ const tools = [
         },
       },
       required: ["partial", "options"],
+    },
+  },
+  {
+    name: "memory",
+    description: "Save something to long-term memory about Duchess, or forget something she asks you to drop. Use 'save' proactively when she shares a preference, important person, health note, routine, or anything she'd want you to always remember across future conversations. Use 'forget' when she asks you to stop remembering something.",
+    input_schema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["save", "forget"] },
+        text:   { type: "string", description: "The fact to save, or a description of what to forget" },
+      },
+      required: ["action", "text"],
     },
   },
 ];
@@ -682,7 +763,8 @@ app.post('/api/chat', async (req, res) => {
 
   try {
     const external = await fetchExternalData(googleAccounts);
-    const systemPrompt = buildSystemPrompt(localData, external);
+    const memories = loadMemories();
+    const systemPrompt = buildSystemPrompt(localData, external, memories);
 
     let currentMessages = messages.slice(-50); // cap history sent to Claude
     let updatedLocalData = {
@@ -716,6 +798,20 @@ app.post('/api/chat', async (req, res) => {
           if (tb.name === 'suggest_completions') {
             pendingCompletions = tb.input.options || [];
             resultText = `Options presented to Duchess: ${pendingCompletions.map((o, i) => `${i + 1}. ${o}`).join(' ')}`;
+          } else if (tb.name === 'memory') {
+            const mems = loadMemories();
+            if (tb.input.action === 'save') {
+              const mem = { id: `m_${Date.now()}`, text: tb.input.text.trim(), created: new Date().toISOString() };
+              mems.push(mem);
+              saveMemories(mems);
+              resultText = `Remembered: "${mem.text}"`;
+            } else {
+              const query = tb.input.text.toLowerCase();
+              const filtered = mems.filter(m => !m.text.toLowerCase().includes(query));
+              const removed = mems.length - filtered.length;
+              saveMemories(filtered);
+              resultText = removed > 0 ? `Forgot ${removed} memory.` : 'Nothing matching that was found in memory.';
+            }
           } else if (['local_task', 'local_schedule', 'local_student_notes'].includes(tb.name)) {
             const outcome = runLocalTool(tb.name, tb.input, updatedLocalData);
             if (outcome.tasks) updatedLocalData.tasks = outcome.tasks;
@@ -733,6 +829,11 @@ app.post('/api/chat', async (req, res) => {
 
       const text = response.content.find(b => b.type === 'text')?.text || "I'm not sure what to say.";
       const needsConsultant = !useConsultant && text.includes('advisor');
+
+      // Persist this exchange to rolling history (max 40 turns)
+      const lastUserMsg = req.body.messages.slice().reverse().find(m => m.role === 'user');
+      const userText = typeof lastUserMsg?.content === 'string' ? lastUserMsg.content : '';
+      if (userText) appendHistory(userText, text);
 
       return res.json({ response: text, localData: updatedLocalData, needsConsultant, model, googleTokenExpired: !!external.googleAuthError, calendar: external.calendar, emails: external.emails, completions: pendingCompletions });
     }

@@ -30,10 +30,15 @@ class CirceApp {
     this.convEl = document.getElementById('conversation');
     this.taskListEl = document.getElementById('task-list');
 
+    this.memories = [];
+
     this.updateTaskDisplay();
     this.updateCalendarDisplay();
     this.initGoogle();      // sets up GIS, then loads connection status
     this.loadTTSVoice();    // read saved voice preference from server settings
+    this.initSidebarWidgets();
+    this.fetchMemories();
+    this.loadChatHistory();
 
     if (!SpeechRecognition) {
       document.getElementById('error-banner').style.display = 'block';
@@ -73,7 +78,26 @@ class CirceApp {
   }
 
   updateTaskDisplay() {
-    const pending = (this.data.tasks || []).filter(t => !t.done);
+    const all = this.data.tasks || [];
+    const pending = all.filter(t => !t.done);
+
+    // Progress bar
+    const bar  = document.getElementById('task-progress-bar');
+    const wrap = bar?.closest('.task-progress-wrap');
+    if (bar && wrap) {
+      const total = all.length;
+      const done  = all.length - pending.length;
+      if (total > 0) {
+        const pct = Math.round((done / total) * 100);
+        wrap.style.display = 'block';
+        bar.style.width = `${pct}%`;
+        bar.style.background = pct === 100 ? '#22c55e' : '#7c3aed';
+        bar.title = `${done} of ${total} tasks done`;
+      } else {
+        wrap.style.display = 'none';
+      }
+    }
+
     if (pending.length === 0) {
       this.taskListEl.innerHTML = '<div class="no-tasks">No tasks yet</div>';
       return;
@@ -131,6 +155,153 @@ class CirceApp {
         ${eventsHtml}
       </div>`;
     }).join('');
+  }
+
+  // ── Memories ─────────────────────────────────────────────────────────────────
+
+  async fetchMemories() {
+    try {
+      this.memories = await fetch('/api/memories').then(r => r.json());
+      this.updateMemoriesDisplay();
+    } catch { /* silently ignore — sidebar just stays empty */ }
+  }
+
+  async deleteMemory(id) {
+    await fetch(`/api/memories/${id}`, { method: 'DELETE' });
+    await this.fetchMemories();
+  }
+
+  updateMemoriesDisplay() {
+    const el = document.getElementById('memories-list');
+    if (!el) return;
+    if (!this.memories.length) {
+      el.innerHTML = '<div class="no-memories">Nothing remembered yet</div>';
+      return;
+    }
+    el.innerHTML = this.memories.map(m => `
+      <div class="memory-item" data-id="${this.escapeHtml(m.id)}">
+        <span class="memory-text">${this.escapeHtml(m.text)}</span>
+        <button class="memory-delete" title="Forget this" onclick="app.deleteMemory('${this.escapeHtml(m.id)}')">✕</button>
+      </div>`).join('');
+  }
+
+  // ── Chat history ──────────────────────────────────────────────────────────────
+
+  async loadChatHistory() {
+    try {
+      const history = await fetch('/api/chat-history').then(r => r.json());
+      if (!history.length) return;
+      // Inject previous turns into the conversation array so Claude has context
+      this.conversation = [
+        ...history.map(h => ({ role: h.role, content: h.content })),
+        ...this.conversation,
+      ];
+      // Show a subtle visual divider so Kate can see where the new session starts
+      const divider = document.createElement('div');
+      divider.className = 'history-divider';
+      divider.textContent = '— previous session —';
+      this.convEl.appendChild(divider);
+    } catch { /* silently ignore */ }
+  }
+
+  // ── Sidebar widgets ─────────────────────────────────────────────────────────
+
+  initSidebarWidgets() {
+    this._tickClock();
+    setInterval(() => this._tickClock(), 1000);
+    this._fetchWeather();
+    setInterval(() => this._fetchWeather(), 60 * 60 * 1000);
+    this._fetchDailyImage();
+  }
+
+  _tickClock() {
+    const el = document.getElementById('sidebar-clock');
+    if (!el) return;
+    const now  = new Date();
+    const time = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    const date = now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+    el.innerHTML = `<div class="clock-time">${time}</div><div class="clock-date">${date}</div>`;
+  }
+
+  async _fetchWeather() {
+    const el = document.getElementById('sidebar-weather');
+    if (!el) return;
+    try {
+      const pos = await new Promise((resolve, reject) =>
+        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 6000 })
+      );
+      const { latitude: lat, longitude: lon } = pos.coords;
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(4)}&longitude=${lon.toFixed(4)}&current=temperature_2m,weather_code&temperature_unit=fahrenheit&timezone=auto`;
+      const data = await fetch(url).then(r => r.json());
+      const temp = Math.round(data.current.temperature_2m);
+      const code = data.current.weather_code;
+      const emoji = this._weatherEmoji(code);
+      const desc  = this._weatherDesc(code);
+      el.innerHTML = `
+        <div class="weather-main">
+          <span class="weather-emoji">${emoji}</span>
+          <span class="weather-temp">${temp}°</span>
+        </div>
+        <div class="weather-desc">${desc}</div>`;
+    } catch {
+      el.innerHTML = ''; // fail silently — clock still shows
+    }
+  }
+
+  _weatherEmoji(code) {
+    if (code === 0)            return '☀️';
+    if (code <= 3)             return '⛅';
+    if (code <= 48)            return '🌫️';
+    if (code <= 55)            return '🌦️';
+    if (code <= 67)            return '🌧️';
+    if (code <= 77)            return '❄️';
+    if (code <= 82)            return '🌦️';
+    return '⛈️';
+  }
+
+  _weatherDesc(code) {
+    if (code === 0)            return 'Clear';
+    if (code <= 2)             return 'Partly cloudy';
+    if (code === 3)            return 'Overcast';
+    if (code <= 48)            return 'Foggy';
+    if (code <= 55)            return 'Drizzle';
+    if (code <= 65)            return 'Rain';
+    if (code <= 67)            return 'Freezing rain';
+    if (code <= 75)            return 'Snow';
+    if (code <= 77)            return 'Snow grains';
+    if (code <= 82)            return 'Showers';
+    return 'Thunderstorm';
+  }
+
+  async _fetchDailyImage(forceRefresh = false) {
+    const wrap = document.getElementById('daily-image-wrap');
+    if (!wrap) return;
+
+    const today    = new Date().toISOString().slice(0, 10);
+    const cacheKey = 'circe_daily_image';
+    const cached   = JSON.parse(sessionStorage.getItem(cacheKey) || 'null');
+
+    let url;
+    if (!forceRefresh && cached && cached.date === today) {
+      url = cached.url;
+    } else {
+      try {
+        const data = await fetch('https://dog.ceo/api/breed/poodle/images/random').then(r => r.json());
+        url = data.message;
+        sessionStorage.setItem(cacheKey, JSON.stringify({ date: today, url }));
+      } catch { return; }
+    }
+
+    if (!url) return;
+    const img = new Image();
+    img.className = 'daily-image';
+    img.style.cursor = 'pointer';
+    img.title = 'Click for a new poodle';
+    img.alt = '';
+    img.onclick = () => this._fetchDailyImage(true);
+    img.onload  = () => { wrap.innerHTML = ''; wrap.appendChild(img); img.classList.add('loaded'); };
+    img.onerror = () => { wrap.innerHTML = ''; };
+    img.src = url;
   }
 
   async refreshSidebar() {

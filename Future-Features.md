@@ -120,14 +120,27 @@ These are feasible but require a meaningful architecture expansion.
 - Subscription ~$5/month for personal use volume
 - **Implementation:** same `/api/tts` swap as OpenAI TTS above; add `ELEVENLABS_API_KEY` config
 
+### Home AI Model (Local LLM via Ollama)
+- Run a local language model on Jasper's second machine (Nvidia RTX 4080 Super, 16 GB VRAM) to replace or supplement Claude API calls — eliminating cloud data exposure for sensitive student/FERPA data
+- **Hardware:** RTX 4080S 16 GB fits Llama 3.1 8B fully in VRAM (fastest, ~50 tok/s); Mistral 7B and Qwen2.5 7B also fully fit; 70B models possible with CPU offloading but much slower (~5–8 tok/s)
+- **Recommended model:** Llama 3.1 8B Instruct — best instruction-following in the 8B class; second choice Mistral 7B v0.3
+- **Stack:** Ollama (simplest local server; runs as a background service; exposes OpenAI-compatible `/v1/chat/completions`)
+- **Integration path:** Add `LOCAL_AI_URL` to `.env` (e.g. `http://192.168.x.x:11434`); in `server.js`, fall back to local model when `LOCAL_AI_URL` is set and Anthropic key is absent, or add a toggle in settings
+- **Quality tradeoff:** 8B models handle simple tasks well (task management, scheduling, reading emails) but may struggle with complex reasoning or very long context. Opus escalation ("my advisor") would still need Claude API or a larger model
+- **Privacy gain:** all voice input and student data stays on the local network — nothing leaves the house
+- **Setup effort:** ~2 hours; Ollama install + `ollama pull llama3.1` + network config so Circe's machine can reach it
+
 ### Cross-Calendar Sync (non-Google)
 - Connect phone calendar, watch (via iCloud), Alexa, Siri
 - Unified view across all platforms
 - **Design note:** iCloud Calendar has no public API; Alexa/Siri require their own integrations. Google Calendar is done. This would mean Apple CalDAV or a third-party sync service like Zapier.
 
+
 ### Owner-Assigned Tasks with Notifications
 - Assign tasks to other people; track whether they're done
 - **Design note:** Needs a shared backend or email/SMS integration; not just localStorage
+#### Notes from Jasper
+- feel free to move this to a new section of "not in scope" or "unplanned"
 
 ---
 
