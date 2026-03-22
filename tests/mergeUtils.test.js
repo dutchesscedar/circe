@@ -78,6 +78,32 @@ describe('mergeTasks', () => {
     expect(mergeTasks(null, null)).toEqual([]);
     expect(mergeTasks(undefined, undefined)).toEqual([]);
   });
+
+  // ── Regression: the original duplication bug ──────────────────────────────
+  // Google tasks returned by getTasks() have { id, title, source:'google' } but
+  // NO googleId field. When stored in localStorage and passed back as localTasks,
+  // they must NOT appear in localOnly (they're already in googleTasks).
+  test('regression: Google tasks in localStorage are NOT treated as local-only', () => {
+    // Simulate: task was fetched from Google and saved to localStorage verbatim
+    const savedFromGoogle = { id: 'g1', title: 'Grade papers', source: 'google' }; // no googleId!
+    const result = mergeTasks(
+      [googleTask('g1', 'Grade papers')],  // same task comes back from Google
+      [savedFromGoogle],                   // also sitting in localStorage
+    );
+    // Should dedupe — only one copy, not two
+    expect(result.filter(t => t.title === 'Grade papers')).toHaveLength(1);
+  });
+
+  test('regression: tasks without source field (local) ARE kept even without googleId property', () => {
+    // Older local tasks might not have an explicit googleId: null — just no field at all
+    const bareLocalTask = { id: 1001, title: 'Walk dog', done: false }; // no googleId, no source
+    const result = mergeTasks(
+      [googleTask('g1', 'Buy milk')],
+      [bareLocalTask],
+    );
+    expect(result).toHaveLength(2);
+    expect(result.map(t => t.title)).toContain('Walk dog');
+  });
 });
 
 // ── mergeCalendar ─────────────────────────────────────────────────────────────

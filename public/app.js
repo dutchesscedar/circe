@@ -81,7 +81,7 @@ class CirceApp {
     const priorityOrder = { high: 0, medium: 1, low: 2 };
     const sorted = [...pending].sort((a, b) => (priorityOrder[a.priority] ?? 3) - (priorityOrder[b.priority] ?? 3));
     this.taskListEl.innerHTML = sorted.map(t => {
-      const isLocal = !t.source && t.googleId === null;
+      const isLocal = !t.source;
       const priBadge = t.priority ? `<span class="priority-badge ${t.priority}">${t.priority}</span>` : '';
       const ownerBadge = t.owner ? `<span class="task-owner">${this.escapeHtml(t.owner)}</span>` : '';
       return `<div class="task-item">
@@ -429,8 +429,9 @@ class CirceApp {
 
   async syncWithGoogle() {
     if (!this.getToken('tasks')) return;
-    // Local tasks with no googleId were created while offline
-    const pending = (this.data.tasks || []).filter(t => !t.googleId && !t.done);
+    // Only push tasks that were created locally (no source field).
+    // Google tasks have source:'google' — never re-push them or duplicates accumulate.
+    const pending = (this.data.tasks || []).filter(t => !t.source && !t.done);
     try {
       const res = await fetch('/api/tasks/sync', {
         method: 'POST',
@@ -438,8 +439,10 @@ class CirceApp {
         body: JSON.stringify({ googleAccounts: this.getAccountsPayload(), pendingTasks: pending }),
       });
       if (!res.ok) return;
-      const { tasks } = await res.json();
-      this.saveData({ tasks });
+      const { tasks: googleTasks } = await res.json();
+      // Merge rather than replace: preserves local-only tasks (e.g. completed ones
+      // that Google doesn't return) and deduplicates by title for newly pushed tasks.
+      this.saveData({ tasks: mergeUtils.mergeTasks(googleTasks, this.data.tasks) });
       if (pending.length > 0) {
         const n = pending.length;
         const msg = `I found ${n} task${n > 1 ? 's' : ''} you saved while offline. I've added ${n > 1 ? 'them' : 'it'} to Google for you.`;

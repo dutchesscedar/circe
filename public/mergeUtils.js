@@ -5,10 +5,14 @@
  *
  * Rules:
  * - Google is the source of truth for anything that has been synced.
- * - Local tasks (googleId === null, no source) are kept only if:
- *     (a) their numeric id is not already in the Google list, AND
+ * - Local-only tasks (no source field) are kept only if:
+ *     (a) their id is not already in the Google list, AND
  *     (b) their title (case-insensitive, trimmed) doesn't match any Google task title
  *         (catches tasks created locally then pushed to Google before the id was updated).
+ *
+ * Note: the discriminator is `!t.source`. Google tasks always have source:'google'.
+ * Local tasks never have a source field. Do NOT use googleId — Google tasks returned
+ * from the API have no googleId field, so `t.googleId === null` misses them.
  *
  * @param {Array} googleTasks  - tasks returned by the Google Tasks API (have id & source:'google')
  * @param {Array} localTasks   - current this.data.tasks array (mix of local and previously-merged)
@@ -19,10 +23,9 @@ function mergeTasks(googleTasks, localTasks) {
   const googleTitles = new Set((googleTasks  || []).map(t => (t.title || '').toLowerCase().trim()));
 
   const localOnly = (localTasks || []).filter(t =>
-    !t.source &&
-    t.googleId === null &&
-    !googleIds.has(t.id) &&
-    !googleTitles.has((t.title || '').toLowerCase().trim())
+    !t.source &&                                                          // local tasks have no source
+    !googleIds.has(t.id) &&                                               // id not already in Google
+    !googleTitles.has((t.title || '').toLowerCase().trim())               // title not already in Google
   );
 
   return [...(googleTasks || []), ...localOnly];
