@@ -346,8 +346,8 @@ class CirceApp {
     }, refreshIn);
 
     this.loadConnectionStatus();
-    this.syncWithGoogle();
-    this.refreshSidebar();
+    await this.syncWithGoogle();   // must finish before refresh so pending tasks are in Google
+    await this.refreshSidebar();   // then pull the authoritative Google list back down
   }
 
   async fetchGoogleEmail(token) {
